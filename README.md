@@ -77,6 +77,19 @@ go vet ./...
 go test ./...
 ```
 
+## Releases
+
+Pushing a `v*` tag (e.g. `v1.0.0`) triggers the
+[release workflow](.github/workflows/release.yml), which cross-compiles
+self-contained binaries for Linux, macOS, and Windows on `amd64` and `arm64`,
+packages them (`.tar.gz` for Linux/macOS, `.zip` for Windows) along with a
+`checksums.txt`, and publishes them to a GitHub release.
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
 ## Notes
 
 Rooms and files are stored **in memory** and are not persisted across restarts,
