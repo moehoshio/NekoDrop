@@ -1,0 +1,190 @@
+:root {
+  --bg: #0f1020;
+  --panel: #1a1b33;
+  --panel-2: #23254a;
+  --accent: #ff7eb6;
+  --accent-2: #7afcff;
+  --text: #e8e9f2;
+  --muted: #9aa0c0;
+  --ok: #4ade80;
+  --danger: #f87171;
+  --radius: 14px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: radial-gradient(1200px 600px at 10% -10%, #2a2c55 0%, var(--bg) 55%);
+  color: var(--text);
+}
+
+/* ---------- Landing ---------- */
+body.landing {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.card {
+  width: min(420px, 100%);
+  background: var(--panel);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius);
+  padding: 28px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+}
+
+.logo { margin: 0 0 4px; font-size: 2rem; }
+.tagline { margin: 0 0 22px; color: var(--muted); }
+
+.join-form { display: flex; flex-direction: column; gap: 6px; }
+.join-form label { font-size: 0.85rem; color: var(--muted); margin-top: 8px; }
+.optional { opacity: 0.6; }
+
+input[type="text"] {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 1rem;
+}
+input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 10px;
+  font-size: 1rem;
+}
+
+.join-form button[type="submit"] {
+  margin-top: 16px;
+  padding: 12px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #14152b;
+  font-weight: 600;
+}
+
+.link-button {
+  margin-top: 12px;
+  background: none;
+  color: var(--accent-2);
+  text-decoration: underline;
+  padding: 4px;
+}
+
+.hint {
+  margin-top: 18px;
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* ---------- Room ---------- */
+body.room {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.room-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 18px;
+  background: var(--panel);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.back {
+  color: var(--text);
+  text-decoration: none;
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.room-meta { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.room-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+.room-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.room-status { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--muted); }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+.dot.online { background: var(--ok); }
+.dot.offline { background: var(--danger); }
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.empty { color: var(--muted); text-align: center; margin-top: 40px; }
+
+.message {
+  max-width: min(680px, 100%);
+  background: var(--panel);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+}
+
+.meta { display: flex; gap: 10px; align-items: baseline; margin-bottom: 4px; }
+.who { font-weight: 600; color: var(--accent); font-size: 0.88rem; }
+.when { font-size: 0.72rem; color: var(--muted); }
+
+.body.text { white-space: pre-wrap; word-break: break-word; }
+
+.file {
+  color: var(--accent-2);
+  text-decoration: none;
+  font-weight: 600;
+  word-break: break-all;
+}
+.file:hover { text-decoration: underline; }
+.size { color: var(--muted); font-size: 0.8rem; }
+
+.composer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--panel);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.file-button {
+  cursor: pointer;
+  font-size: 1.3rem;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  user-select: none;
+}
+
+.composer input[type="text"] { flex: 1; }
+
+.composer button[type="submit"] {
+  padding: 12px 18px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #14152b;
+  font-weight: 600;
+}
+
+.upload-bar {
+  padding: 8px 16px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-align: center;
+}

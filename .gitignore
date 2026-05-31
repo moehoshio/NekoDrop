@@ -1,0 +1,12 @@
+# Binaries
+/nekodrop
+*.exe
+
+# Test / coverage output
+*.out
+coverage.txt
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
