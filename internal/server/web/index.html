@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NekoDrop · quick file & message sharing</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="landing">
+  <main class="card">
+    <h1 class="logo">🐱 NekoDrop</h1>
+    <p class="tagline">Drop a code, share files and messages instantly.</p>
+
+    <form id="join-form" class="join-form" autocomplete="off">
+      <label for="code">Room code or path</label>
+      <input id="code" name="code" type="text" placeholder="e.g. team-cats" required>
+
+      <label for="name">Your name <span class="optional">(optional)</span></label>
+      <input id="name" name="name" type="text" placeholder="anonymous">
+
+      <button type="submit">Join room</button>
+    </form>
+
+    <button id="random" class="link-button" type="button">Or create a random room</button>
+
+    <p class="hint">
+      Everyone who enters the same code joins the same room. Share text and
+      files; other members can download whatever you drop.
+    </p>
+  </main>
+
+  <script src="/static/landing.js"></script>
+</body>
+</html>

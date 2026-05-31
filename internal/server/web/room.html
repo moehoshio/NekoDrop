@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NekoDrop room</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="room">
+  <header class="room-header">
+    <a class="back" href="/" title="Leave room">←</a>
+    <div class="room-meta">
+      <span class="room-label">Room</span>
+      <span id="room-name" class="room-name"></span>
+    </div>
+    <div class="room-status">
+      <span id="status-dot" class="dot offline"></span>
+      <span id="status-text">connecting…</span>
+    </div>
+  </header>
+
+  <main id="messages" class="messages" aria-live="polite">
+    <p id="empty" class="empty">No messages yet. Say hi or drop a file!</p>
+  </main>
+
+  <form id="composer" class="composer" autocomplete="off">
+    <label class="file-button" title="Share a file">
+      📎
+      <input id="file-input" type="file" hidden>
+    </label>
+    <input id="text-input" type="text" placeholder="Type a message…" autocomplete="off">
+    <button id="send" type="submit">Send</button>
+  </form>
+
+  <div id="upload-bar" class="upload-bar" hidden>
+    <span id="upload-text"></span>
+  </div>
+
+  <script src="/static/room.js"></script>
+</body>
+</html>
