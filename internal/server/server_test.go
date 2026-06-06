@@ -183,7 +183,7 @@ func TestStreamReplaysHistory(t *testing.T) {
 	s := newTestServer(t)
 	// Seed a message first.
 	rm := s.hub.Room("demo")
-	rm.AddText("alice", "earlier")
+	rm.AddText("alice", "100", "earlier", nil, false)
 
 	// The SSE handler streams until the request context is cancelled.
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
