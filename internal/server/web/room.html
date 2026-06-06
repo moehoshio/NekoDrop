@@ -3,21 +3,35 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>NekoDrop room</title>
+  <title>NekoDrop channel</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="room">
   <header class="room-header">
-    <a class="back" href="/" title="Leave room">←</a>
+    <a class="back" href="/" title="Leave channel">←</a>
     <div class="room-meta">
-      <span class="room-label">Room</span>
-      <span id="room-name" class="room-name"></span>
+      <div class="room-title">
+        <span id="room-name" class="room-name"></span>
+        <span id="room-id" class="room-id"></span>
+        <span id="room-private" class="channel-badge" hidden>🔒 private</span>
+      </div>
+      <span id="room-desc" class="room-desc"></span>
     </div>
-    <div class="room-status">
-      <span id="status-dot" class="dot offline"></span>
-      <span id="status-text">connecting…</span>
+    <div class="room-side">
+      <span id="online" class="online-count" title="People online">🟢 0</span>
+      <button id="notify-btn" class="icon-button" type="button" title="Mentions" hidden>🔔<span id="notify-count" class="notify-count">0</span></button>
+      <button id="join-btn" class="pill-button" type="button" hidden>Join</button>
+      <button id="settings-btn" class="icon-button" type="button" title="Channel settings" hidden>⚙️</button>
+      <div class="room-status">
+        <span id="status-dot" class="dot offline"></span>
+        <span id="status-text">connecting…</span>
+      </div>
     </div>
   </header>
+
+  <div id="announcements" class="announcements" hidden></div>
+
+  <div id="notice" class="notice" hidden></div>
 
   <main id="messages" class="messages" aria-live="polite">
     <p id="empty" class="empty">No messages yet. Say hi or drop a file!</p>
@@ -28,12 +42,78 @@
       📎
       <input id="file-input" type="file" hidden>
     </label>
-    <input id="text-input" type="text" placeholder="Type a message…" autocomplete="off">
+    <div class="composer-input">
+      <input id="text-input" type="text" placeholder="Type a message… use @ to mention" autocomplete="off">
+      <ul id="mention-pop" class="mention-pop" hidden></ul>
+    </div>
+    <label class="preview-toggle" title="Render links & media inline for everyone">
+      <input id="preview-toggle" type="checkbox" checked> preview
+    </label>
     <button id="send" type="submit">Send</button>
   </form>
 
   <div id="upload-bar" class="upload-bar" hidden>
     <span id="upload-text"></span>
+  </div>
+
+  <!-- Settings drawer (owner / admin) -->
+  <div id="settings-drawer" class="drawer" hidden>
+    <div class="drawer-panel">
+      <div class="drawer-head">
+        <h2>Channel settings</h2>
+        <button id="settings-close" class="icon-button" type="button">✕</button>
+      </div>
+      <div class="drawer-body">
+        <form id="settings-form" class="settings-form" autocomplete="off">
+          <label for="s-name">Name</label>
+          <input id="s-name" type="text">
+          <label for="s-desc">Description</label>
+          <input id="s-desc" type="text">
+          <fieldset class="visibility">
+            <legend>Visibility</legend>
+            <label><input type="radio" name="s-visibility" value="public"> Public</label>
+            <label><input type="radio" name="s-visibility" value="private"> Private</label>
+          </fieldset>
+          <label class="check"><input id="s-list" type="checkbox"> Show in public channel list</label>
+          <label class="check"><input id="s-join" type="checkbox"> Allow people to join</label>
+          <label class="check"><input id="s-approval" type="checkbox"> Require approval to join</label>
+          <label class="check"><input id="s-speak" type="checkbox"> Allow members to speak</label>
+          <button type="submit">Save settings</button>
+          <p id="settings-msg" class="form-note" hidden></p>
+        </form>
+
+        <section class="drawer-section">
+          <h3>Post an announcement</h3>
+          <form id="announce-form" class="announce-form">
+            <textarea id="announce-text" rows="3" placeholder="Write an announcement…"></textarea>
+            <button type="submit">Publish announcement</button>
+          </form>
+        </section>
+
+        <section id="pending-section" class="drawer-section" hidden>
+          <h3>Pending join requests</h3>
+          <ul id="pending-list" class="member-list"></ul>
+        </section>
+
+        <section class="drawer-section">
+          <h3>Members &amp; moderation</h3>
+          <p class="form-note">Click a name in chat to moderate that person, or manage them here.</p>
+          <ul id="member-list" class="member-list"></ul>
+        </section>
+
+        <section id="danger-section" class="drawer-section danger" hidden>
+          <h3>Danger zone</h3>
+          <button id="dissolve-btn" class="danger-button" type="button">Dissolve this channel</button>
+          <p class="form-note">The path is released for reuse; the channel ID is retired forever.</p>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lightbox for media previews -->
+  <div id="lightbox" class="lightbox" hidden>
+    <button id="lightbox-close" class="lightbox-close" type="button">✕</button>
+    <div id="lightbox-content" class="lightbox-content"></div>
   </div>
 
   <script src="/static/room.js"></script>

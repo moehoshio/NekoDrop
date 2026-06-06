@@ -40,20 +40,6 @@ func NormalizeKey(raw string) string {
 	return key
 }
 
-// sanitizeSender trims a display name and applies a sane default and length
-// limit. The returned value is later rendered as text on the client, never as
-// HTML.
-func sanitizeSender(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return "anonymous"
-	}
-	if len(name) > 64 {
-		name = name[:64]
-	}
-	return name
-}
-
 // sanitizeFileName strips any directory components and control characters from
 // an uploaded file name, guarding against path traversal.
 func sanitizeFileName(name string) string {

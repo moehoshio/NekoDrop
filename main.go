@@ -19,9 +19,13 @@ import (
 func main() {
 	addr := flag.String("addr", defaultEnv("NEKODROP_ADDR", ":8080"), "HTTP listen address")
 	maxUpload := flag.Int64("max-upload", defaultEnvInt("NEKODROP_MAX_UPLOAD", server.DefaultMaxUploadBytes), "maximum upload size in bytes")
+	maxChannels := flag.Int("max-channels-per-user", int(defaultEnvInt("NEKODROP_MAX_CHANNELS", 5)), "maximum channels a single user may own (0 = unlimited)")
 	flag.Parse()
 
-	srv, err := server.New(server.Options{MaxUploadBytes: *maxUpload})
+	srv, err := server.New(server.Options{
+		MaxUploadBytes:     *maxUpload,
+		MaxChannelsPerUser: *maxChannels,
+	})
 	if err != nil {
 		log.Fatalf("nekodrop: failed to initialize server: %v", err)
 	}

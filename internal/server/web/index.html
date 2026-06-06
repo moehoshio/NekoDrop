@@ -7,26 +7,65 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="landing">
-  <main class="card">
-    <h1 class="logo">🐱 NekoDrop</h1>
-    <p class="tagline">Drop a code, share files and messages instantly.</p>
+  <main class="landing-wrap">
+    <section class="card">
+      <h1 class="logo">🐱 NekoDrop</h1>
+      <p class="tagline">Drop a code, share files and messages instantly.</p>
 
-    <form id="join-form" class="join-form" autocomplete="off">
-      <label for="code">Room code or path</label>
-      <input id="code" name="code" type="text" placeholder="e.g. team-cats" required>
+      <p class="me-line">You are <span id="me-label" class="me-label">…</span></p>
 
-      <label for="name">Your name <span class="optional">(optional)</span></label>
-      <input id="name" name="name" type="text" placeholder="anonymous">
+      <form id="join-form" class="join-form" autocomplete="off">
+        <label for="code">Channel code or path</label>
+        <input id="code" name="code" type="text" placeholder="e.g. team-cats" required>
 
-      <button type="submit">Join room</button>
-    </form>
+        <label for="name">Your name <span class="optional">(optional)</span></label>
+        <input id="name" name="name" type="text" placeholder="anonymous">
 
-    <button id="random" class="link-button" type="button">Or create a random room</button>
+        <button type="submit">Join channel</button>
+      </form>
 
-    <p class="hint">
-      Everyone who enters the same code joins the same room. Share text and
-      files; other members can download whatever you drop.
-    </p>
+      <button id="random" class="link-button" type="button">Or create a random room</button>
+
+      <details id="create-box" class="create-box">
+        <summary>Create a channel you control</summary>
+        <form id="create-form" class="create-form" autocomplete="off">
+          <label for="c-name">Channel name</label>
+          <input id="c-name" type="text" placeholder="Team Cats" required>
+
+          <label for="c-desc">Description <span class="optional">(optional)</span></label>
+          <input id="c-desc" type="text" placeholder="What is this channel about?">
+
+          <fieldset class="visibility">
+            <legend>Visibility</legend>
+            <label><input type="radio" name="visibility" value="public" checked> Public — anyone can read, join to speak</label>
+            <label><input type="radio" name="visibility" value="private"> Private — members only</label>
+          </fieldset>
+
+          <label class="check"><input id="c-list" type="checkbox" checked> Show in the public channel list</label>
+          <label class="check"><input id="c-join" type="checkbox" checked> Allow people to join</label>
+          <label class="check"><input id="c-approval" type="checkbox"> Require approval to join</label>
+          <label class="check"><input id="c-speak" type="checkbox" checked> Allow members to speak</label>
+
+          <button type="submit">Create channel</button>
+          <p id="create-error" class="form-error" hidden></p>
+        </form>
+      </details>
+
+      <p class="hint">
+        Everyone who enters the same code joins the same channel. Share text and
+        files; other members can download whatever you drop.
+      </p>
+    </section>
+
+    <section class="card directory">
+      <div class="directory-head">
+        <h2>Public channels</h2>
+        <button id="refresh" class="link-button" type="button">Refresh</button>
+      </div>
+      <ul id="channel-list" class="channel-list">
+        <li class="channel-empty">Loading…</li>
+      </ul>
+    </section>
   </main>
 
   <script src="/static/landing.js"></script>
