@@ -9,65 +9,94 @@
 <body class="landing">
   <main class="landing-wrap">
     <section class="card">
-      <h1 class="logo">🐱 NekoDrop</h1>
-      <p class="tagline">Drop a code, share files and messages instantly.</p>
+      <div class="card-head">
+        <h1 class="logo">🐱 NekoDrop</h1>
+        <label class="lang-picker">
+          <span class="sr-only" data-i18n="lang.label">Language</span>
+          <select class="lang-select" aria-label="Language">
+            <option value="en">English</option>
+            <option value="zh">繁體中文</option>
+          </select>
+        </label>
+      </div>
+      <p class="tagline" data-i18n="app.tagline">Drop a code, share files and messages instantly.</p>
 
-      <p class="me-line">You are <span id="me-label" class="me-label">…</span></p>
+      <p class="me-line">
+        <span data-i18n="landing.you_are">You are</span>
+        <span id="me-label" class="me-label">…</span>
+        <span id="me-guest" class="me-guest" data-i18n="landing.guest_hint" hidden>(unnamed guest — set a name below)</span>
+      </p>
 
       <form id="join-form" class="join-form" autocomplete="off">
-        <label for="code">Channel code or path</label>
-        <input id="code" name="code" type="text" placeholder="e.g. team-cats" required>
+        <label for="code" data-i18n="landing.code_label">Channel code or path</label>
+        <input id="code" name="code" type="text" data-i18n-placeholder="landing.code_ph" placeholder="e.g. team-cats" required>
 
-        <label for="name">Your name <span class="optional">(optional)</span></label>
-        <input id="name" name="name" type="text" placeholder="anonymous">
+        <label for="name">
+          <span data-i18n="landing.name_label">Your name</span>
+          <span class="optional" data-i18n="landing.optional">(optional)</span>
+        </label>
+        <input id="name" name="name" type="text" data-i18n-placeholder="landing.name_ph" placeholder="Guest">
 
-        <button type="submit">Join channel</button>
+        <button type="submit" data-i18n="landing.join">Join channel</button>
       </form>
 
-      <button id="random" class="link-button" type="button">Or create a random room</button>
+      <button id="random" class="link-button" type="button" data-i18n="landing.random">Or create a random room</button>
 
       <details id="create-box" class="create-box">
-        <summary>Create a channel you control</summary>
+        <summary data-i18n="landing.create_summary">Create a channel you control</summary>
         <form id="create-form" class="create-form" autocomplete="off">
-          <label for="c-name">Channel name</label>
-          <input id="c-name" type="text" placeholder="Team Cats" required>
+          <label for="c-name" data-i18n="landing.c_name_label">Channel name</label>
+          <input id="c-name" type="text" data-i18n-placeholder="landing.c_name_ph" placeholder="Team Cats" required>
 
-          <label for="c-desc">Description <span class="optional">(optional)</span></label>
-          <input id="c-desc" type="text" placeholder="What is this channel about?">
+          <label for="c-desc">
+            <span data-i18n="landing.desc_label">Description</span>
+            <span class="optional" data-i18n="landing.optional">(optional)</span>
+          </label>
+          <input id="c-desc" type="text" data-i18n-placeholder="landing.desc_ph" placeholder="What is this channel about?">
 
           <fieldset class="visibility">
-            <legend>Visibility</legend>
-            <label><input type="radio" name="visibility" value="public" checked> Public — anyone can read, join to speak</label>
-            <label><input type="radio" name="visibility" value="private"> Private — members only</label>
+            <legend data-i18n="landing.visibility">Visibility</legend>
+            <label class="check"><input type="radio" name="visibility" value="public" checked> <span data-i18n="landing.vis_public">Public — anyone can read, join to speak</span></label>
+            <label class="check"><input type="radio" name="visibility" value="private"> <span data-i18n="landing.vis_private">Private — members only</span></label>
           </fieldset>
 
-          <label class="check"><input id="c-list" type="checkbox" checked> Show in the public channel list</label>
-          <label class="check"><input id="c-join" type="checkbox" checked> Allow people to join</label>
-          <label class="check"><input id="c-approval" type="checkbox"> Require approval to join</label>
-          <label class="check"><input id="c-speak" type="checkbox" checked> Allow members to speak</label>
+          <label class="check"><input id="c-list" type="checkbox" checked> <span data-i18n="landing.show_public">Show in the public channel list</span></label>
+          <label class="check"><input id="c-join" type="checkbox" checked> <span data-i18n="landing.allow_join">Allow people to join</span></label>
+          <label class="check"><input id="c-approval" type="checkbox"> <span data-i18n="landing.require_approval">Require approval to join</span></label>
+          <label class="check"><input id="c-speak" type="checkbox" checked> <span data-i18n="landing.allow_speak">Allow members to speak</span></label>
 
-          <button type="submit">Create channel</button>
+          <button type="submit" data-i18n="landing.create">Create channel</button>
           <p id="create-error" class="form-error" hidden></p>
         </form>
       </details>
 
-      <p class="hint">
+      <p class="hint" data-i18n="landing.hint">
         Everyone who enters the same code joins the same channel. Share text and
         files; other members can download whatever you drop.
       </p>
     </section>
 
-    <section class="card directory">
-      <div class="directory-head">
-        <h2>Public channels</h2>
-        <button id="refresh" class="link-button" type="button">Refresh</button>
-      </div>
-      <ul id="channel-list" class="channel-list">
-        <li class="channel-empty">Loading…</li>
-      </ul>
-    </section>
+    <div class="side-column">
+      <section id="mine-card" class="card directory" hidden>
+        <div class="directory-head">
+          <h2 data-i18n="landing.your_channels">Your channels</h2>
+        </div>
+        <ul id="mine-list" class="channel-list"></ul>
+      </section>
+
+      <section class="card directory">
+        <div class="directory-head">
+          <h2 data-i18n="landing.public_channels">Public channels</h2>
+          <span class="live-dot" title="Live"></span>
+        </div>
+        <ul id="channel-list" class="channel-list">
+          <li class="channel-empty" data-i18n="landing.loading">Loading…</li>
+        </ul>
+      </section>
+    </div>
   </main>
 
+  <script src="/static/i18n.js"></script>
   <script src="/static/landing.js"></script>
 </body>
 </html>

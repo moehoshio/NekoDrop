@@ -1,0 +1,17 @@
+{
+  "host": "0.0.0.0",
+  "port": 8080,
+  "maxUploadBytes": 33554432,
+  "maxChannelsPerUser": 5,
+  "storage": {
+    "backend": "memory",
+    "dsn": ""
+  },
+  "limits": {
+    "maxMessagesPerChannel": 1000,
+    "maxFileBytesPerChannel": 134217728,
+    "maxSubscribersPerChannel": 512,
+    "maxChannels": 10000,
+    "maxUsers": 100000
+  }
+}

@@ -1,16 +1,20 @@
-// Landing page: identity, join/create channels, and the public directory.
+// Landing page: identity, join/create channels, and the live public directory.
 (function () {
   "use strict";
+
+  const t = (k, v) => (window.NekoI18n ? window.NekoI18n.t(k, v) : k);
 
   const form = document.getElementById("join-form");
   const codeInput = document.getElementById("code");
   const nameInput = document.getElementById("name");
   const randomButton = document.getElementById("random");
   const meLabel = document.getElementById("me-label");
+  const meGuest = document.getElementById("me-guest");
   const createForm = document.getElementById("create-form");
   const createError = document.getElementById("create-error");
   const channelList = document.getElementById("channel-list");
-  const refreshButton = document.getElementById("refresh");
+  const mineCard = document.getElementById("mine-card");
+  const mineList = document.getElementById("mine-list");
 
   let me = null;
 
@@ -81,15 +85,24 @@
   });
 
   // --- Identity ---
+  function renderMe() {
+    if (!me) return;
+    meLabel.textContent = me.name + "#" + me.uid;
+    // An unnamed visitor keeps the default name; flag that distinctly so it is
+    // never confused with someone who deliberately chose a name.
+    meGuest.hidden = !!me.named;
+    meLabel.classList.toggle("is-guest", !me.named);
+  }
+
   async function loadMe() {
     try {
       const res = await fetch("/api/me", { method: "GET" });
       if (res.ok) {
         me = await res.json();
-        meLabel.textContent = me.name + "#" + me.uid;
+        renderMe();
       }
     } catch (e) {
-      meLabel.textContent = "anonymous";
+      meLabel.textContent = "…";
     }
   }
 
@@ -119,14 +132,14 @@
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
-        createError.textContent = (await res.text()).trim() || "Could not create channel.";
+        createError.textContent = (await res.text()).trim() || t("landing.create_err");
         createError.hidden = false;
         return;
       }
       const channel = await res.json();
       window.location.href = "/r/" + encodeURIComponent(channel.key);
     } catch (err) {
-      createError.textContent = "Network error. Please try again.";
+      createError.textContent = t("landing.net_err");
       createError.hidden = false;
     }
   });
@@ -153,7 +166,7 @@
     if (c.visibility === "private") {
       const lock = document.createElement("span");
       lock.className = "channel-badge";
-      lock.textContent = "🔒 private";
+      lock.textContent = t("badge.private");
       top.appendChild(lock);
     }
     link.appendChild(top);
@@ -169,9 +182,10 @@
     meta.className = "channel-meta";
     const online = document.createElement("span");
     online.className = "channel-online";
-    online.textContent = "🟢 " + c.online + " online";
+    online.textContent = "🟢 " + c.online + " " + t("directory.online");
     const members = document.createElement("span");
-    members.textContent = c.members + " member" + (c.members === 1 ? "" : "s");
+    const n = c.members || 0;
+    members.textContent = n + " " + (n === 1 ? t("directory.member") : t("directory.members"));
     meta.appendChild(online);
     meta.appendChild(members);
     link.appendChild(meta);
@@ -180,30 +194,57 @@
     return li;
   }
 
+  // Build a fresh list of <li> nodes, used to diff against the live DOM so the
+  // auto-refresh never flickers when nothing changed.
+  function renderList(target, channels, emptyKey) {
+    const html = channels.map((c) => c.id + ":" + c.online + ":" + c.members + ":" + c.name).join("|");
+    if (target.dataset.sig === html) return;
+    target.dataset.sig = html;
+    target.innerHTML = "";
+    if (channels.length === 0) {
+      const li = document.createElement("li");
+      li.className = "channel-empty";
+      li.textContent = t(emptyKey);
+      target.appendChild(li);
+      return;
+    }
+    channels.forEach((c) => target.appendChild(channelEntry(c)));
+  }
+
   async function loadChannels() {
-    channelList.innerHTML = "";
     try {
       const res = await fetch("/api/channels");
       const data = await res.json();
       const channels = (data && data.channels) || [];
-      if (channels.length === 0) {
-        const li = document.createElement("li");
-        li.className = "channel-empty";
-        li.textContent = "No public channels yet. Create one above!";
-        channelList.appendChild(li);
-        return;
+      const mine = (data && data.mine) || [];
+      renderList(channelList, channels, "landing.no_public");
+      if (mine.length > 0) {
+        mineCard.hidden = false;
+        renderList(mineList, mine, "landing.no_owned");
+      } else {
+        mineCard.hidden = true;
       }
-      channels.forEach((c) => channelList.appendChild(channelEntry(c)));
     } catch (e) {
+      channelList.dataset.sig = "";
+      channelList.innerHTML = "";
       const li = document.createElement("li");
       li.className = "channel-empty";
-      li.textContent = "Could not load channels.";
+      li.textContent = t("landing.load_err");
       channelList.appendChild(li);
     }
   }
 
-  refreshButton.addEventListener("click", loadChannels);
-
+  // The directory refreshes itself: a steady poll keeps online counts and new
+  // channels current without a manual button.
   loadMe();
   loadChannels();
+  setInterval(loadChannels, 4000);
+
+  // Re-render language-dependent dynamic text when the language changes.
+  document.addEventListener("nekodrop:langchange", function () {
+    renderMe();
+    channelList.dataset.sig = "";
+    mineList.dataset.sig = "";
+    loadChannels();
+  });
 })();

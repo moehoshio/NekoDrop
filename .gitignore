@@ -6,6 +6,12 @@
 *.out
 coverage.txt
 
+# Local config & SQLite databases
+/config.json
+*.db
+*.db-wal
+*.db-shm
+
 # Editor / OS noise
 .DS_Store
 .idea/
