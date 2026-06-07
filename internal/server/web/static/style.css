@@ -264,7 +264,8 @@ input[type="radio"]:focus-visible {
   justify-content: space-between;
   gap: 12px;
 }
-.lang-picker { display: inline-flex; align-items: center; }
+.lang-picker { display: inline-flex; align-items: center; gap: 4px; }
+.lang-icon { font-size: 1rem; line-height: 1; opacity: 0.85; }
 .lang-select {
   appearance: none;
   -webkit-appearance: none;
