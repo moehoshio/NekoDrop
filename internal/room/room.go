@@ -147,6 +147,56 @@ var (
 	ErrLimitReached = errors.New("channel creation limit reached")
 )
 
+// Limits bound NekoDrop's in-memory footprint so that untrusted, unauthenticated
+// traffic cannot exhaust server memory (a denial-of-service vector that is most
+// acute for the default in-memory backend, where nothing is offloaded to disk).
+//
+// Every limit is finite: a non-positive value is replaced by the corresponding
+// DefaultLimits value rather than meaning "unlimited", so misconfiguration fails
+// safe.
+type Limits struct {
+	// MaxMessagesPerChannel is the most recent messages kept in memory per
+	// channel. Older messages are evicted (and their file payloads freed).
+	MaxMessagesPerChannel int
+	// MaxFileBytesPerChannel caps the total bytes of uploaded file payloads
+	// held in memory for a single channel.
+	MaxFileBytesPerChannel int64
+	// MaxSubscribersPerChannel caps concurrent live (SSE) connections to one
+	// channel.
+	MaxSubscribersPerChannel int
+	// MaxChannels caps the number of simultaneously live channels; idle,
+	// ownerless channels are reclaimed to make room.
+	MaxChannels int
+}
+
+// maxAnnouncements bounds how many announcements are kept resident per channel.
+const maxAnnouncements = 200
+
+// DefaultLimits are the conservative defaults applied when a limit is unset.
+var DefaultLimits = Limits{
+	MaxMessagesPerChannel:    1000,
+	MaxFileBytesPerChannel:   128 << 20, // 128 MiB
+	MaxSubscribersPerChannel: 512,
+	MaxChannels:              10000,
+}
+
+func (l Limits) withDefaults() Limits {
+	out := l
+	if out.MaxMessagesPerChannel <= 0 {
+		out.MaxMessagesPerChannel = DefaultLimits.MaxMessagesPerChannel
+	}
+	if out.MaxFileBytesPerChannel <= 0 {
+		out.MaxFileBytesPerChannel = DefaultLimits.MaxFileBytesPerChannel
+	}
+	if out.MaxSubscribersPerChannel <= 0 {
+		out.MaxSubscribersPerChannel = DefaultLimits.MaxSubscribersPerChannel
+	}
+	if out.MaxChannels <= 0 {
+		out.MaxChannels = DefaultLimits.MaxChannels
+	}
+	return out
+}
+
 // Room is a single channel. All exported methods are safe for concurrent use.
 type Room struct {
 	Key string
@@ -166,9 +216,17 @@ type Room struct {
 	messages      []Message
 	files         map[string]*File
 	announcements []Announcement
+	fileBytes     int64 // total bytes of file payloads currently in memory
 
 	online      map[string]int // uid -> active connection count
 	subscribers map[chan Event]struct{}
+
+	// Per-channel memory bounds.
+	maxMessages    int
+	maxFileBytes   int64
+	maxSubscribers int
+
+	lastActive time.Time
 
 	store     storage.Store
 	dissolved bool
@@ -176,19 +234,64 @@ type Room struct {
 
 func newRoom(key, id string) *Room {
 	return &Room{
-		Key:         key,
-		ID:          id,
-		settings:    Settings{Name: key, Visibility: Public, AllowJoin: true, AllowSpeak: true},
-		admins:      make(map[string]bool),
-		members:     make(map[string]bool),
-		banned:      make(map[string]bool),
-		muted:       make(map[string]bool),
-		pending:     make(map[string]string),
-		names:       make(map[string]string),
-		files:       make(map[string]*File),
-		online:      make(map[string]int),
-		subscribers: make(map[chan Event]struct{}),
-		store:       storage.NewMemory(),
+		Key:            key,
+		ID:             id,
+		settings:       Settings{Name: key, Visibility: Public, AllowJoin: true, AllowSpeak: true},
+		admins:         make(map[string]bool),
+		members:        make(map[string]bool),
+		banned:         make(map[string]bool),
+		muted:          make(map[string]bool),
+		pending:        make(map[string]string),
+		names:          make(map[string]string),
+		files:          make(map[string]*File),
+		online:         make(map[string]int),
+		subscribers:    make(map[chan Event]struct{}),
+		maxMessages:    DefaultLimits.MaxMessagesPerChannel,
+		maxFileBytes:   DefaultLimits.MaxFileBytesPerChannel,
+		maxSubscribers: DefaultLimits.MaxSubscribersPerChannel,
+		lastActive:     time.Now(),
+		store:          storage.NewMemory(),
+	}
+}
+
+// applyLimits sets the per-channel bounds. Called right after construction,
+// before the room is shared.
+func (r *Room) applyLimits(l Limits) {
+	r.maxMessages = l.MaxMessagesPerChannel
+	r.maxFileBytes = l.MaxFileBytesPerChannel
+	r.maxSubscribers = l.MaxSubscribersPerChannel
+}
+
+// trimLocked enforces the per-channel memory bounds, evicting the oldest
+// messages (and freeing any file payloads they own) until both the file-byte
+// budget and the message-count cap are satisfied. The caller holds r.mu.
+func (r *Room) trimLocked() {
+	for r.maxFileBytes > 0 && r.fileBytes > r.maxFileBytes && len(r.messages) > 1 {
+		r.evictOldestLocked()
+	}
+	if r.maxMessages > 0 && len(r.messages) > r.maxMessages {
+		drop := len(r.messages) - r.maxMessages
+		for i := 0; i < drop; i++ {
+			r.evictOldestLocked()
+		}
+	}
+}
+
+// evictOldestLocked removes the oldest message, freeing its file payload if it
+// owned one. The caller holds r.mu.
+func (r *Room) evictOldestLocked() {
+	if len(r.messages) == 0 {
+		return
+	}
+	old := r.messages[0]
+	// Advance the slice header; the backing array is reclaimed on the next
+	// append-triggered reallocation, bounding memory to ~2x the cap.
+	r.messages = r.messages[1:]
+	if old.Kind == KindFile && old.FileID != "" {
+		if f, ok := r.files[old.FileID]; ok {
+			r.fileBytes -= int64(len(f.Data))
+			delete(r.files, old.FileID)
+		}
 	}
 }
 
@@ -203,6 +306,31 @@ func (r *Room) rememberName(uid, name string) {
 		return
 	}
 	r.names[uid] = name
+}
+
+// hasStandingLocked reports whether uid has any persistent standing in the
+// channel (owner, admin, member, muted, banned or a pending request). Only such
+// users appear in the moderation roster, so only their names are worth keeping.
+// The caller holds at least a read lock.
+func (r *Room) hasStandingLocked(uid string) bool {
+	if uid == "" {
+		return false
+	}
+	if r.isOwner(uid) || r.admins[uid] || r.members[uid] || r.muted[uid] || r.banned[uid] {
+		return true
+	}
+	_, pending := r.pending[uid]
+	return pending
+}
+
+// rememberSenderName retains a sender's display name only when they have a
+// standing in the channel. Transient public speakers are not tracked, so a
+// flood of fresh, cookieless identities posting to one channel cannot grow the
+// roster map without bound. The caller holds the write lock.
+func (r *Room) rememberSenderName(uid, name string) {
+	if r.hasStandingLocked(uid) {
+		r.rememberName(uid, name)
+	}
 }
 
 // record builds the persistable snapshot of this channel. The caller must hold
@@ -372,6 +500,7 @@ func (r *Room) Subscribe(uid string) (history []Message, announcements []Announc
 
 	c := make(chan Event, 64)
 	r.subscribers[c] = struct{}{}
+	r.lastActive = time.Now()
 	if uid != "" {
 		r.online[uid]++
 	}
@@ -431,6 +560,15 @@ func (r *Room) Subscribers() int {
 	return len(r.subscribers)
 }
 
+// SubscriberLimitReached reports whether the channel is already at its cap of
+// concurrent live connections. It is an approximate, lock-free-of-ordering
+// guard used to shed load before establishing a new stream.
+func (r *Room) SubscriberLimitReached() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.maxSubscribers > 0 && len(r.subscribers) >= r.maxSubscribers
+}
+
 // --- Messages & files ---
 
 // AddText records a text message and broadcasts it.
@@ -447,7 +585,9 @@ func (r *Room) AddText(sender, senderUID, text string, mentions []string, previe
 	}
 	r.mu.Lock()
 	r.messages = append(r.messages, m)
-	r.rememberName(senderUID, sender)
+	r.rememberSenderName(senderUID, sender)
+	r.lastActive = time.Now()
+	r.trimLocked()
 	r.mu.Unlock()
 	if r.store != nil {
 		_ = r.store.AppendMessage(r.messageRecord(m))
@@ -473,8 +613,11 @@ func (r *Room) AddFile(sender, senderUID, name, contentType string, data []byte)
 	}
 	r.mu.Lock()
 	r.files[f.ID] = f
+	r.fileBytes += f.Size()
 	r.messages = append(r.messages, m)
-	r.rememberName(senderUID, sender)
+	r.rememberSenderName(senderUID, sender)
+	r.lastActive = time.Now()
+	r.trimLocked()
 	r.mu.Unlock()
 	if r.store != nil {
 		_ = r.store.SaveFile(storage.File{ID: f.ID, ChannelID: r.ID, Name: f.Name, ContentType: f.ContentType, Data: f.Data})
@@ -516,8 +659,14 @@ func (r *Room) File(id string) (*File, error) {
 	if r.store != nil {
 		if sf, found, err := r.store.LoadFile(id); err == nil && found {
 			f = &File{ID: sf.ID, Name: sf.Name, ContentType: sf.ContentType, Data: sf.Data}
+			// Cache the payload only while it keeps us within the file-byte
+			// budget; beyond that, serve it straight from the store so a flood
+			// of downloads of old files cannot grow memory without bound.
 			r.mu.Lock()
-			r.files[id] = f
+			if r.maxFileBytes <= 0 || r.fileBytes+f.Size() <= r.maxFileBytes {
+				r.files[id] = f
+				r.fileBytes += f.Size()
+			}
 			r.mu.Unlock()
 			return f, nil
 		}
@@ -547,6 +696,11 @@ func (r *Room) AddAnnouncement(authorUID, authorName, text string) Announcement 
 	}
 	r.mu.Lock()
 	r.announcements = append(r.announcements, a)
+	// Keep only the most recent announcements resident; the durable store (when
+	// configured) retains the full set.
+	if len(r.announcements) > maxAnnouncements {
+		r.announcements = append([]Announcement(nil), r.announcements[len(r.announcements)-maxAnnouncements:]...)
+	}
 	r.mu.Unlock()
 	if r.store != nil {
 		_ = r.store.AppendAnnouncement(storage.Announcement{
@@ -840,18 +994,20 @@ type Hub struct {
 	usedIDs   map[string]bool // every ID ever issued; never reused
 	ownerNum  map[string]int  // active channels per owner UID
 	maxPerUID int
+	limits    Limits
 	store     storage.Store
 }
 
 // NewHub returns an empty Hub with no durable backing. maxPerUID is the number
 // of channels a single owner may have active at once (<= 0 means unlimited).
 func NewHub(maxPerUID int) *Hub {
-	return NewHubWithStore(maxPerUID, storage.NewMemory())
+	return NewHubWithStore(maxPerUID, storage.NewMemory(), DefaultLimits)
 }
 
-// NewHubWithStore returns a Hub backed by the given Store, restoring any
-// channels it has persisted. A memory Store yields an empty, process-local hub.
-func NewHubWithStore(maxPerUID int, store storage.Store) *Hub {
+// NewHubWithStore returns a Hub backed by the given Store and bounded by the
+// given Limits, restoring any channels the store has persisted. A memory Store
+// yields an empty, process-local hub.
+func NewHubWithStore(maxPerUID int, store storage.Store, limits Limits) *Hub {
 	if store == nil {
 		store = storage.NewMemory()
 	}
@@ -861,6 +1017,7 @@ func NewHubWithStore(maxPerUID int, store storage.Store) *Hub {
 		usedIDs:   make(map[string]bool),
 		ownerNum:  make(map[string]int),
 		maxPerUID: maxPerUID,
+		limits:    limits.withDefaults(),
 		store:     store,
 	}
 	h.restore()
@@ -875,6 +1032,7 @@ func (h *Hub) restore() {
 	}
 	for _, c := range channels {
 		r := newRoom(c.Key, c.ID)
+		r.applyLimits(h.limits)
 		r.store = h.store
 		r.ownerUID = c.OwnerUID
 		r.settings = Settings{
@@ -900,7 +1058,12 @@ func (h *Hub) restore() {
 			r.pending[uid] = name
 		}
 		// Restore message and announcement history (file blobs load lazily).
+		// Only the most recent MaxMessagesPerChannel are kept resident so a
+		// large on-disk history cannot blow the in-memory budget on restart.
 		if msgs, err := h.store.LoadMessages(c.ID); err == nil {
+			if r.maxMessages > 0 && len(msgs) > r.maxMessages {
+				msgs = msgs[len(msgs)-r.maxMessages:]
+			}
 			for _, m := range msgs {
 				r.messages = append(r.messages, Message{
 					ID: m.ID, Kind: MessageKind(m.Kind), Sender: m.Sender, SenderUID: m.SenderUID,
@@ -911,6 +1074,9 @@ func (h *Hub) restore() {
 			}
 		}
 		if anns, err := h.store.LoadAnnouncements(c.ID); err == nil {
+			if len(anns) > maxAnnouncements {
+				anns = anns[len(anns)-maxAnnouncements:]
+			}
 			for _, a := range anns {
 				r.announcements = append(r.announcements, Announcement{
 					ID: a.ID, AuthorUID: a.AuthorUID, AuthorName: a.AuthorName, Text: a.Text, Time: a.Time,
@@ -990,12 +1156,55 @@ func (h *Hub) Create(key, ownerUID string, s Settings) (*Room, error) {
 }
 
 func (h *Hub) createLocked(key string) *Room {
+	h.reclaimLocked()
 	id := h.newChannelID()
 	r := newRoom(key, id)
+	r.applyLimits(h.limits)
 	r.store = h.store
 	h.byKey[key] = r
 	h.byID[id] = r
 	return r
+}
+
+// reclaimLocked bounds the number of live channels. When the hub is at its cap,
+// it evicts the least-recently-active ownerless channel that currently has no
+// live connections. Owned channels and channels with active subscribers are
+// never evicted, so reclamation only sweeps up abandoned ad-hoc rooms — the
+// channels an attacker can spawn for free by hitting unique keys. The caller
+// holds h.mu.
+func (h *Hub) reclaimLocked() {
+	if h.limits.MaxChannels <= 0 || len(h.byKey) < h.limits.MaxChannels {
+		return
+	}
+	var victim *Room
+	var victimKey string
+	var victimSeen time.Time
+	for k, r := range h.byKey {
+		r.mu.RLock()
+		evictable := r.ownerUID == "" && len(r.subscribers) == 0
+		la := r.lastActive
+		r.mu.RUnlock()
+		if !evictable {
+			continue
+		}
+		if victim == nil || la.Before(victimSeen) {
+			victim, victimKey, victimSeen = r, k, la
+		}
+	}
+	if victim == nil {
+		return // nothing safely evictable; tolerate a soft over-cap
+	}
+	delete(h.byKey, victimKey)
+	delete(h.byID, victim.ID)
+	// A reclaimed ad-hoc room was never a deliberately "retired" channel, so its
+	// ID may be reissued; releasing it keeps usedIDs from growing without bound.
+	delete(h.usedIDs, victim.ID)
+	victim.mu.Lock()
+	victim.dissolved = true
+	victim.mu.Unlock()
+	if h.store != nil {
+		_ = h.store.DeleteChannel(victim.ID)
+	}
 }
 
 // Dissolve removes the channel, releasing its key for reuse. The channel ID is

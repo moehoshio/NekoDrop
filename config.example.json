@@ -6,5 +6,12 @@
   "storage": {
     "backend": "memory",
     "dsn": ""
+  },
+  "limits": {
+    "maxMessagesPerChannel": 1000,
+    "maxFileBytesPerChannel": 134217728,
+    "maxSubscribersPerChannel": 512,
+    "maxChannels": 10000,
+    "maxUsers": 100000
   }
 }

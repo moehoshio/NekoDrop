@@ -16,6 +16,22 @@ import (
 // (32 MiB). It is duplicated here to avoid an import cycle.
 const DefaultMaxUploadBytes = 32 << 20
 
+// Limits bound NekoDrop's in-memory footprint to prevent untrusted traffic from
+// exhausting server memory. A non-positive value uses a safe built-in default.
+type Limits struct {
+	// MaxMessagesPerChannel is the most recent messages kept in memory per
+	// channel (older ones are evicted with their file payloads).
+	MaxMessagesPerChannel int `json:"maxMessagesPerChannel"`
+	// MaxFileBytesPerChannel caps in-memory uploaded-file bytes per channel.
+	MaxFileBytesPerChannel int64 `json:"maxFileBytesPerChannel"`
+	// MaxSubscribersPerChannel caps concurrent live connections per channel.
+	MaxSubscribersPerChannel int `json:"maxSubscribersPerChannel"`
+	// MaxChannels caps the number of simultaneously live channels.
+	MaxChannels int `json:"maxChannels"`
+	// MaxUsers caps the number of identities retained in memory.
+	MaxUsers int `json:"maxUsers"`
+}
+
 // Storage configures the durable persistence backend.
 type Storage struct {
 	// Backend is one of "memory" (default), "sqlite" or "mysql".
@@ -39,6 +55,8 @@ type Config struct {
 	MaxChannelsPerUser int `json:"maxChannelsPerUser"`
 	// Storage selects and configures the persistence backend.
 	Storage Storage `json:"storage"`
+	// Limits bound in-memory resource usage.
+	Limits Limits `json:"limits"`
 }
 
 // Default returns the configuration used when nothing is specified.
@@ -105,6 +123,31 @@ func (c *Config) ApplyEnv() {
 	}
 	if v := os.Getenv("NEKODROP_STORAGE_DSN"); v != "" {
 		c.Storage.DSN = v
+	}
+	if v := os.Getenv("NEKODROP_MAX_MESSAGES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.Limits.MaxMessagesPerChannel = n
+		}
+	}
+	if v := os.Getenv("NEKODROP_MAX_FILE_BYTES"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			c.Limits.MaxFileBytesPerChannel = n
+		}
+	}
+	if v := os.Getenv("NEKODROP_MAX_SUBSCRIBERS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.Limits.MaxSubscribersPerChannel = n
+		}
+	}
+	if v := os.Getenv("NEKODROP_MAX_LIVE_CHANNELS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.Limits.MaxChannels = n
+		}
+	}
+	if v := os.Getenv("NEKODROP_MAX_USERS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.Limits.MaxUsers = n
+		}
 	}
 	c.normalize()
 }

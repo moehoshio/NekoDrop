@@ -41,6 +41,11 @@ type Options struct {
 	// Store is the durable persistence backend. When nil, a non-persistent
 	// in-memory store is used and the server keeps its original behaviour.
 	Store storage.Store
+	// Limits bound in-memory resource usage. Zero-valued fields fall back to
+	// room.DefaultLimits.
+	Limits room.Limits
+	// MaxUsers caps identities retained in memory (0 = default).
+	MaxUsers int
 }
 
 // Server is the NekoDrop HTTP handler.
@@ -68,8 +73,8 @@ func New(opts Options) (*Server, error) {
 	}
 
 	s := &Server{
-		hub:       room.NewHubWithStore(opts.MaxChannelsPerUser, store),
-		users:     user.NewRegistryWithStore(store),
+		hub:       room.NewHubWithStore(opts.MaxChannelsPerUser, store, opts.Limits),
+		users:     user.NewRegistryWithStore(store, opts.MaxUsers),
 		mux:       http.NewServeMux(),
 		static:    static,
 		maxUpload: maxUpload,
@@ -503,6 +508,12 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	rm := s.hub.Room(key)
 	if !rm.CanRead(u.UID) {
 		http.Error(w, "this channel is private; join to view it", http.StatusForbidden)
+		return
+	}
+	// Shed load before opening a new stream so a flood of connections to one
+	// channel cannot exhaust goroutines and memory.
+	if rm.SubscriberLimitReached() {
+		http.Error(w, "this channel has too many active connections; try again shortly", http.StatusServiceUnavailable)
 		return
 	}
 

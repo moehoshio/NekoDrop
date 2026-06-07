@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/moehoshio/NekoDrop/internal/config"
+	"github.com/moehoshio/NekoDrop/internal/room"
 	"github.com/moehoshio/NekoDrop/internal/server"
 	"github.com/moehoshio/NekoDrop/internal/storage"
 )
@@ -73,6 +74,13 @@ func main() {
 		MaxUploadBytes:     cfg.MaxUploadBytes,
 		MaxChannelsPerUser: cfg.MaxChannelsPerUser,
 		Store:              store,
+		Limits: room.Limits{
+			MaxMessagesPerChannel:    cfg.Limits.MaxMessagesPerChannel,
+			MaxFileBytesPerChannel:   cfg.Limits.MaxFileBytesPerChannel,
+			MaxSubscribersPerChannel: cfg.Limits.MaxSubscribersPerChannel,
+			MaxChannels:              cfg.Limits.MaxChannels,
+		},
+		MaxUsers: cfg.Limits.MaxUsers,
 	})
 	if err != nil {
 		log.Fatalf("nekodrop: failed to initialize server: %v", err)

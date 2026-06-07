@@ -88,6 +88,20 @@ Example config file ([`config.example.json`](config.example.json)):
 
 When a persistent backend is selected, channels, membership, message history, uploaded files and announcements survive restarts. A dissolved channel's path becomes available again, but its retired channel ID is never reissued. Uploaded files are always served with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff` to prevent execution in the browser.
 
+### Resource limits
+
+Because the default backend keeps everything in memory, NekoDrop enforces finite, configurable bounds so that untrusted traffic cannot exhaust server memory. Each limit falls back to a safe default when unset (a non-positive value never means "unlimited").
+
+| Config key (`limits.*`) | Env var | Default | Bounds |
+| ----------------------- | ------- | ------- | ------ |
+| `maxMessagesPerChannel` | `NEKODROP_MAX_MESSAGES` | `1000` | Recent messages kept per channel; older ones are evicted with their files |
+| `maxFileBytesPerChannel` | `NEKODROP_MAX_FILE_BYTES` | `134217728` (128 MiB) | In-memory uploaded-file bytes per channel |
+| `maxSubscribersPerChannel` | `NEKODROP_MAX_SUBSCRIBERS` | `512` | Concurrent live connections per channel |
+| `maxChannels` | `NEKODROP_MAX_LIVE_CHANNELS` | `10000` | Live channels; idle ownerless channels are reclaimed to make room |
+| `maxUsers` | `NEKODROP_MAX_USERS` | `100000` | Identities retained in memory; oldest unnamed ones are evicted |
+
+With a persistent backend the full history still lives in the database; these limits only cap what is held resident in memory.
+
 ---
 
 ## Building from Source

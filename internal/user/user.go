@@ -31,6 +31,12 @@ const firstUID = 100
 // unnamed state is always obvious in the UI.
 const DefaultName = "Guest"
 
+// DefaultMaxUsers bounds how many identities are retained in memory. Because a
+// fresh identity is minted for every cookieless request, an unbounded registry
+// is a denial-of-service vector; the oldest unnamed identities are evicted once
+// the cap is reached.
+const DefaultMaxUsers = 100_000
+
 // User is a single known visitor. Token is the secret stored in the client's
 // cookie; UID is the short, public, stable identifier shown in the UI. Named
 // reports whether the visitor has deliberately chosen their current name (as
@@ -46,39 +52,78 @@ type User struct {
 func (u *User) Label() string { return u.Name + "#" + u.UID }
 
 // Registry is a concurrency-safe in-memory store of users keyed by token,
-// optionally backed by a durable Store.
+// optionally backed by a durable Store. The number of resident identities is
+// bounded by maxUsers to cap memory under cookieless traffic.
 type Registry struct {
-	mu      sync.RWMutex
-	byToken map[string]*User
-	nextUID int
-	store   storage.Store
+	mu       sync.RWMutex
+	byToken  map[string]*User
+	order    []string // tokens in insertion order, for eviction
+	nextUID  int
+	maxUsers int
+	store    storage.Store
 }
 
 // NewRegistry returns an empty Registry with no durable backing.
-func NewRegistry() *Registry { return NewRegistryWithStore(storage.NewMemory()) }
+func NewRegistry() *Registry { return NewRegistryWithStore(storage.NewMemory(), DefaultMaxUsers) }
 
 // NewRegistryWithStore returns a Registry whose users are loaded from and
-// persisted to the given Store. A memory Store yields the original
-// process-local behaviour.
-func NewRegistryWithStore(store storage.Store) *Registry {
+// persisted to the given Store, retaining at most maxUsers identities in
+// memory. A memory Store yields the original process-local behaviour; a
+// non-positive maxUsers falls back to DefaultMaxUsers.
+func NewRegistryWithStore(store storage.Store, maxUsers int) *Registry {
 	if store == nil {
 		store = storage.NewMemory()
 	}
+	if maxUsers <= 0 {
+		maxUsers = DefaultMaxUsers
+	}
 	r := &Registry{
-		byToken: make(map[string]*User),
-		nextUID: firstUID,
-		store:   store,
+		byToken:  make(map[string]*User),
+		nextUID:  firstUID,
+		maxUsers: maxUsers,
+		store:    store,
 	}
 	if users, err := store.LoadUsers(); err == nil {
 		for _, su := range users {
 			u := &User{Token: su.Token, UID: su.UID, Name: su.Name, Named: su.Named}
 			r.byToken[u.Token] = u
+			r.order = append(r.order, u.Token)
 			if n, err := strconv.Atoi(u.UID); err == nil && n >= r.nextUID {
 				r.nextUID = n + 1
 			}
 		}
 	}
 	return r
+}
+
+// evictLocked drops the oldest identity to stay within maxUsers, preferring
+// unnamed (anonymous) identities so that deliberately named users survive
+// longest. The caller holds the write lock.
+func (r *Registry) evictLocked() {
+	if r.maxUsers <= 0 || len(r.byToken) < r.maxUsers {
+		return
+	}
+	// Prefer the oldest unnamed user; fall back to the oldest user overall.
+	victim := -1
+	for i, tok := range r.order {
+		u := r.byToken[tok]
+		if u == nil {
+			continue
+		}
+		if !u.Named {
+			victim = i
+			break
+		}
+		if victim == -1 {
+			victim = i
+		}
+	}
+	if victim == -1 {
+		return
+	}
+	tok := r.order[victim]
+	r.order = append(r.order[:victim], r.order[victim+1:]...)
+	delete(r.byToken, tok)
 }
 
 // Get returns the user bound to token, or nil if the token is unknown.
@@ -93,6 +138,7 @@ func (r *Registry) Get(token string) *User {
 // name leaves the user on the default name until they choose one.
 func (r *Registry) Create(name string) *User {
 	r.mu.Lock()
+	r.evictLocked()
 	uid := strconv.Itoa(r.nextUID)
 	r.nextUID++
 
@@ -104,6 +150,7 @@ func (r *Registry) Create(name string) *User {
 		Named: named,
 	}
 	r.byToken[u.Token] = u
+	r.order = append(r.order, u.Token)
 	r.mu.Unlock()
 
 	r.persist(u)
