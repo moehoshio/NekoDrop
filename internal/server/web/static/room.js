@@ -120,7 +120,9 @@
     if (e.target === els.lightbox) closeLightbox();
   });
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") { closeLightbox(); }
+    if (e.key !== "Escape") return;
+    if (!els.lightbox.hidden) { closeLightbox(); }
+    else if (!els.drawer.hidden) { closeDrawer(); }
   });
 
   // ---------- rendering ----------

@@ -13,6 +13,12 @@
 
 * { box-sizing: border-box; }
 
+/* The `hidden` attribute must always win, even over class rules that set
+   `display` (e.g. .drawer / .lightbox / .announcements use display:flex).
+   Without this, author `display` rules override the UA `[hidden]{display:none}`
+   and those fixed, full-screen overlays stay visible and block the page. */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   height: 100%;
