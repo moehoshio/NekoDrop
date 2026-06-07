@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/moehoshio/NekoDrop/internal/room"
+	"github.com/moehoshio/NekoDrop/internal/storage"
 	"github.com/moehoshio/NekoDrop/internal/user"
 )
 
@@ -37,6 +38,9 @@ type Options struct {
 	// MaxChannelsPerUser caps how many channels a single user may own at once.
 	// Zero or negative means unlimited.
 	MaxChannelsPerUser int
+	// Store is the durable persistence backend. When nil, a non-persistent
+	// in-memory store is used and the server keeps its original behaviour.
+	Store storage.Store
 }
 
 // Server is the NekoDrop HTTP handler.
@@ -58,10 +62,14 @@ func New(opts Options) (*Server, error) {
 	if maxUpload <= 0 {
 		maxUpload = DefaultMaxUploadBytes
 	}
+	store := opts.Store
+	if store == nil {
+		store = storage.NewMemory()
+	}
 
 	s := &Server{
-		hub:       room.NewHub(opts.MaxChannelsPerUser),
-		users:     user.NewRegistry(),
+		hub:       room.NewHubWithStore(opts.MaxChannelsPerUser, store),
+		users:     user.NewRegistryWithStore(store),
 		mux:       http.NewServeMux(),
 		static:    static,
 		maxUpload: maxUpload,
@@ -197,8 +205,11 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, name, ctype s
 // --- Channel directory & lifecycle ---
 
 func (s *Server) handleChannelList(w http.ResponseWriter, r *http.Request) {
-	s.currentUser(w, r) // ensure the visitor has an identity cookie
-	writeJSON(w, http.StatusOK, map[string]any{"channels": s.hub.PublicList()})
+	u := s.currentUser(w, r) // ensure the visitor has an identity cookie
+	writeJSON(w, http.StatusOK, map[string]any{
+		"channels": s.hub.PublicList(),
+		"mine":     s.hub.OwnedBy(u.UID),
+	})
 }
 
 func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
@@ -269,6 +280,7 @@ type channelView struct {
 	Channel room.Info            `json:"channel"`
 	Role    room.Role            `json:"role"`
 	Pending []room.PendingMember `json:"pending,omitempty"`
+	Members []room.Member        `json:"members,omitempty"`
 }
 
 func (s *Server) handleChannelInfo(w http.ResponseWriter, r *http.Request) {
@@ -292,6 +304,7 @@ func (s *Server) handleChannelInfo(w http.ResponseWriter, r *http.Request) {
 	view := channelView{Channel: rm.Info(), Role: rm.RoleOf(u.UID)}
 	if rm.IsAdmin(u.UID) {
 		view.Pending = rm.Pending()
+		view.Members = rm.Members()
 	}
 	writeJSON(w, http.StatusOK, view)
 }
@@ -419,7 +432,11 @@ func (s *Server) handleModerate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"channel": rm.Info(), "pending": rm.Pending()})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"channel": rm.Info(),
+		"pending": rm.Pending(),
+		"members": rm.Members(),
+	})
 }
 
 func (s *Server) handleAnnounce(w http.ResponseWriter, r *http.Request) {

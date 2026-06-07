@@ -39,28 +39,54 @@ Then open <http://localhost:8080> in your browser, enter a room code (or generat
 - **Inline media & link previews** — images, video and audio appear inline and open in a lightbox.
 - **Live presence** — see how many people are currently online in a channel.
 - **Text & file sharing** — send messages or drop a file; every member sees it instantly.
-- **Real-time updates** — powered by Server-Sent Events, no page refresh needed.
-- **Zero external dependencies** — built on the Go standard library; the web UI is embedded into the binary.
+- **Real-time updates** — powered by Server-Sent Events, no page refresh needed. The public directory and your own channels refresh themselves live — no manual refresh button.
+- **Multi-language UI** — English and 繁體中文 built in, switchable from a picker and remembered per browser.
+- **Paste & drop attachments** — paste an image from the clipboard or drop files onto the chat; preview and remove them before sending.
+- **Pluggable storage** — keep everything in memory (default) or persist to SQLite or MySQL so channels and history survive restarts.
+- **Configurable** — a JSON config file plus environment variables and flags control the listen address, limits and storage.
 
 ## Configuration
 
-NekoDrop can be configured with command-line flags or environment variables:
+Settings are resolved from a **JSON config file**, then **environment variables**, then **command-line flags** (each layer overrides the previous). Every setting has a default, so NekoDrop runs with no configuration at all.
 
-| Flag | Env var | Default | Description |
-| ---- | ------- | ------- | ----------- |
-| `-addr` | `NEKODROP_ADDR` | `:8080` | HTTP listen address |
-| `-max-upload` | `NEKODROP_MAX_UPLOAD` | `33554432` (32 MiB) | Max single-file upload size (bytes) |
-| `-max-channels-per-user` | `NEKODROP_MAX_CHANNELS` | `5` | Channels a single user may own at once (`0` = unlimited) |
+| Flag | Env var | Config key | Default | Description |
+| ---- | ------- | ---------- | ------- | ----------- |
+| `-config` | `NEKODROP_CONFIG` | — | `config.json` | Path to a JSON config file (optional) |
+| `-host` | `NEKODROP_HOST` | `host` | `` (all) | IP address to listen on |
+| `-port` | `NEKODROP_PORT` | `port` | `8080` | TCP port to listen on |
+| `-addr` | `NEKODROP_ADDR` | — | `:8080` | `host:port` shorthand |
+| `-max-upload` | `NEKODROP_MAX_UPLOAD` | `maxUploadBytes` | `33554432` (32 MiB) | Max single-file upload size (bytes) |
+| `-max-channels-per-user` | `NEKODROP_MAX_CHANNELS` | `maxChannelsPerUser` | `5` | Channels a single user may own at once (`0` = unlimited) |
+| `-storage` | `NEKODROP_STORAGE_BACKEND` | `storage.backend` | `memory` | Storage backend: `memory`, `sqlite`, or `mysql` |
+| `-storage-dsn` | `NEKODROP_STORAGE_DSN` | `storage.dsn` | — | Backend DSN (see below) |
 
-Example:
+Example config file ([`config.example.json`](config.example.json)):
 
-```bash
-./nekodrop -addr :9000 -max-upload 67108864 -max-channels-per-user 10
+```json
+{
+  "host": "0.0.0.0",
+  "port": 8080,
+  "maxUploadBytes": 33554432,
+  "maxChannelsPerUser": 5,
+  "storage": { "backend": "sqlite", "dsn": "nekodrop.db" }
+}
 ```
 
-## Notes
+```bash
+./nekodrop -config config.json
+# or purely from flags:
+./nekodrop -host 0.0.0.0 -port 9000 -storage sqlite -storage-dsn nekodrop.db
+```
 
-Channels, identities and files are stored **in memory** and are not persisted across restarts, which keeps NekoDrop simple and fast for quick, ephemeral transfers. A dissolved channel's path becomes available again, but its retired channel ID is never reissued. Uploaded files are always served with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff` to prevent execution in the browser.
+### Storage backends
+
+| Backend | DSN | Notes |
+| ------- | --- | ----- |
+| `memory` | — | Default. Nothing is persisted; fastest and simplest. |
+| `sqlite` | file path, e.g. `nekodrop.db` | Embedded, single-file, pure-Go (no cgo). |
+| `mysql` | `user:pass@tcp(host:3306)/nekodrop` | Standard Go MySQL DSN; works with MySQL/MariaDB. |
+
+When a persistent backend is selected, channels, membership, message history, uploaded files and announcements survive restarts. A dissolved channel's path becomes available again, but its retired channel ID is never reissued. Uploaded files are always served with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff` to prevent execution in the browser.
 
 ---
 
@@ -90,8 +116,10 @@ go test ./...
 .
 ├── main.go                  # Server entry point, flags, graceful shutdown
 └── internal/
-    ├── user/                # In-memory identities and UID assignment
-    ├── room/                # In-memory channels, membership, messages, files, events
+    ├── config/              # JSON file + env + flag configuration
+    ├── storage/             # Persistence: memory / sqlite / mysql backends
+    ├── user/                # Identities and UID assignment
+    ├── room/                # Channels, membership, messages, files, events
     └── server/              # HTTP handlers + embedded web UI
         └── web/             # HTML, CSS, JS (embedded via go:embed)
 ```
@@ -104,11 +132,11 @@ The web UI is the primary interface, but the underlying HTTP API is straightforw
 | ------------- | ----------- |
 | `GET /` | Landing page (join, create, public directory) |
 | `GET /r/{room}` | Channel page |
-| `GET /api/me` | Current identity (`{uid,name}`); sets the cookie |
+| `GET /api/me` | Current identity (`{uid,name,named}`); sets the cookie |
 | `POST /api/me` | Update display name (`{"name"}`); UID is unchanged |
-| `GET /api/channels` | List channels opted into the public directory |
+| `GET /api/channels` | Public directory (`channels`) plus your own channels (`mine`) |
 | `POST /api/channels` | Create an owned channel (name, visibility, settings…) |
-| `GET /api/channels/{room}` | Channel metadata + your role (+ pending list if admin) |
+| `GET /api/channels/{room}` | Channel metadata + your role (+ pending & member roster if admin) |
 | `PATCH /api/channels/{room}` | Update settings (owner/admin) |
 | `DELETE /api/channels/{room}` | Dissolve the channel (owner) |
 | `POST /api/channels/{room}/join` | Join (or request approval) |

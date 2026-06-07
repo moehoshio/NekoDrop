@@ -1,0 +1,10 @@
+{
+  "host": "0.0.0.0",
+  "port": 8080,
+  "maxUploadBytes": 33554432,
+  "maxChannelsPerUser": 5,
+  "storage": {
+    "backend": "memory",
+    "dsn": ""
+  }
+}

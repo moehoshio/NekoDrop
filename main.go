@@ -9,29 +9,77 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
+	"github.com/moehoshio/NekoDrop/internal/config"
 	"github.com/moehoshio/NekoDrop/internal/server"
+	"github.com/moehoshio/NekoDrop/internal/storage"
 )
 
 func main() {
-	addr := flag.String("addr", defaultEnv("NEKODROP_ADDR", ":8080"), "HTTP listen address")
-	maxUpload := flag.Int64("max-upload", defaultEnvInt("NEKODROP_MAX_UPLOAD", server.DefaultMaxUploadBytes), "maximum upload size in bytes")
-	maxChannels := flag.Int("max-channels-per-user", int(defaultEnvInt("NEKODROP_MAX_CHANNELS", 5)), "maximum channels a single user may own (0 = unlimited)")
+	// Resolve configuration: file < environment < flags.
+	configPath := flag.String("config", defaultEnv("NEKODROP_CONFIG", "config.json"), "path to JSON config file (optional)")
+
+	// Flags default to the empty/zero sentinel so we can tell whether the user
+	// set them explicitly and only then override the file/env values.
+	addr := flag.String("addr", "", "HTTP listen address (host:port); overrides config host/port")
+	host := flag.String("host", "", "IP address to listen on (overrides config)")
+	port := flag.Int("port", 0, "TCP port to listen on (overrides config)")
+	maxUpload := flag.Int64("max-upload", 0, "maximum upload size in bytes (overrides config)")
+	maxChannels := flag.Int("max-channels-per-user", -1, "maximum channels a single user may own (0 = unlimited)")
+	storageBackend := flag.String("storage", "", "storage backend: memory, sqlite or mysql (overrides config)")
+	storageDSN := flag.String("storage-dsn", "", "storage DSN: sqlite file path or mysql DSN (overrides config)")
 	flag.Parse()
 
+	// The config file is optional unless the user explicitly named one.
+	explicitConfig := *configPath != "config.json" || os.Getenv("NEKODROP_CONFIG") != ""
+	cfg, err := config.LoadFile(*configPath, !explicitConfig)
+	if err != nil {
+		log.Fatalf("nekodrop: %v", err)
+	}
+	cfg.ApplyEnv()
+
+	// Flag overrides (highest precedence).
+	if *addr != "" {
+		cfg.ApplyAddr(*addr)
+	}
+	if *host != "" {
+		cfg.Host = *host
+	}
+	if *port != 0 {
+		cfg.Port = *port
+	}
+	if *maxUpload != 0 {
+		cfg.MaxUploadBytes = *maxUpload
+	}
+	if *maxChannels >= 0 {
+		cfg.MaxChannelsPerUser = *maxChannels
+	}
+	if *storageBackend != "" {
+		cfg.Storage.Backend = *storageBackend
+	}
+	if *storageDSN != "" {
+		cfg.Storage.DSN = *storageDSN
+	}
+
+	store, err := storage.Open(cfg.Storage.Backend, cfg.Storage.DSN)
+	if err != nil {
+		log.Fatalf("nekodrop: storage: %v", err)
+	}
+	defer store.Close()
+
 	srv, err := server.New(server.Options{
-		MaxUploadBytes:     *maxUpload,
-		MaxChannelsPerUser: *maxChannels,
+		MaxUploadBytes:     cfg.MaxUploadBytes,
+		MaxChannelsPerUser: cfg.MaxChannelsPerUser,
+		Store:              store,
 	})
 	if err != nil {
 		log.Fatalf("nekodrop: failed to initialize server: %v", err)
 	}
 
 	httpServer := &http.Server{
-		Addr:              *addr,
+		Addr:              cfg.Addr(),
 		Handler:           srv,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
@@ -40,7 +88,7 @@ func main() {
 	defer stop()
 
 	go func() {
-		log.Printf("nekodrop: listening on %s", *addr)
+		log.Printf("nekodrop: listening on %s (storage: %s)", cfg.Addr(), store.Backend())
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("nekodrop: server error: %v", err)
 		}
@@ -59,15 +107,6 @@ func main() {
 func defaultEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
-	}
-	return fallback
-}
-
-func defaultEnvInt(key string, fallback int64) int64 {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-			return n
-		}
 	}
 	return fallback
 }

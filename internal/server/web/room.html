@@ -8,23 +8,29 @@
 </head>
 <body class="room">
   <header class="room-header">
-    <a class="back" href="/" title="Leave channel">←</a>
+    <a class="back" href="/" data-i18n-title="room.leave" title="Leave channel">←</a>
     <div class="room-meta">
       <div class="room-title">
         <span id="room-name" class="room-name"></span>
         <span id="room-id" class="room-id"></span>
-        <span id="room-private" class="channel-badge" hidden>🔒 private</span>
+        <span id="room-private" class="channel-badge" hidden></span>
       </div>
       <span id="room-desc" class="room-desc"></span>
     </div>
     <div class="room-side">
-      <span id="online" class="online-count" title="People online">🟢 0</span>
-      <button id="notify-btn" class="icon-button" type="button" title="Mentions" hidden>🔔<span id="notify-count" class="notify-count">0</span></button>
-      <button id="join-btn" class="pill-button" type="button" hidden>Join</button>
-      <button id="settings-btn" class="icon-button" type="button" title="Channel settings" hidden>⚙️</button>
+      <span id="online" class="online-count" data-i18n-title="room.online_title" title="People online">🟢 0</span>
+      <button id="notify-btn" class="icon-button" type="button" data-i18n-title="room.mentions" title="Mentions" hidden>🔔<span id="notify-count" class="notify-count">0</span></button>
+      <button id="join-btn" class="pill-button" type="button" hidden data-i18n="room.join">Join</button>
+      <button id="settings-btn" class="icon-button" type="button" data-i18n-title="room.settings" title="Channel settings" hidden>⚙️</button>
+      <label class="lang-picker">
+        <select class="lang-select" aria-label="Language">
+          <option value="en">EN</option>
+          <option value="zh">中文</option>
+        </select>
+      </label>
       <div class="room-status">
         <span id="status-dot" class="dot offline"></span>
-        <span id="status-text">connecting…</span>
+        <span id="status-text" data-i18n="room.connecting">connecting…</span>
       </div>
     </div>
   </header>
@@ -34,22 +40,31 @@
   <div id="notice" class="notice" hidden></div>
 
   <main id="messages" class="messages" aria-live="polite">
-    <p id="empty" class="empty">No messages yet. Say hi or drop a file!</p>
+    <p id="empty" class="empty" data-i18n="room.empty">No messages yet. Say hi or drop a file!</p>
   </main>
 
+  <!-- Attachment preview: pasted/dropped/selected files staged before sending -->
+  <div id="attach-bar" class="attach-bar" hidden>
+    <ul id="attach-list" class="attach-list"></ul>
+    <div class="attach-actions">
+      <button id="attach-clear" class="ghost-button" type="button" data-i18n="room.attach_clear">Clear</button>
+      <button id="attach-send" class="pill-button" type="button" data-i18n="room.attach_send">Send attachments</button>
+    </div>
+  </div>
+
   <form id="composer" class="composer" autocomplete="off">
-    <label class="file-button" title="Share a file">
+    <label class="file-button" data-i18n-title="room.share_file" title="Share a file">
       📎
-      <input id="file-input" type="file" hidden>
+      <input id="file-input" type="file" multiple hidden>
     </label>
     <div class="composer-input">
-      <input id="text-input" type="text" placeholder="Type a message… use @ to mention" autocomplete="off">
+      <input id="text-input" type="text" data-i18n-placeholder="room.msg_ph" placeholder="Type a message… use @ to mention" autocomplete="off">
       <ul id="mention-pop" class="mention-pop" hidden></ul>
     </div>
     <label class="preview-toggle" title="Render links & media inline for everyone">
-      <input id="preview-toggle" type="checkbox" checked> preview
+      <input id="preview-toggle" type="checkbox" checked> <span data-i18n="room.preview">preview</span>
     </label>
-    <button id="send" type="submit">Send</button>
+    <button id="send" type="submit" data-i18n="room.send">Send</button>
   </form>
 
   <div id="upload-bar" class="upload-bar" hidden>
@@ -60,51 +75,51 @@
   <div id="settings-drawer" class="drawer" hidden>
     <div class="drawer-panel">
       <div class="drawer-head">
-        <h2>Channel settings</h2>
+        <h2 data-i18n="settings.title">Channel settings</h2>
         <button id="settings-close" class="icon-button" type="button">✕</button>
       </div>
       <div class="drawer-body">
         <form id="settings-form" class="settings-form" autocomplete="off">
-          <label for="s-name">Name</label>
+          <label for="s-name" data-i18n="settings.name">Name</label>
           <input id="s-name" type="text">
-          <label for="s-desc">Description</label>
+          <label for="s-desc" data-i18n="settings.desc">Description</label>
           <input id="s-desc" type="text">
           <fieldset class="visibility">
-            <legend>Visibility</legend>
-            <label><input type="radio" name="s-visibility" value="public"> Public</label>
-            <label><input type="radio" name="s-visibility" value="private"> Private</label>
+            <legend data-i18n="settings.visibility">Visibility</legend>
+            <label class="check"><input type="radio" name="s-visibility" value="public"> <span data-i18n="settings.public">Public</span></label>
+            <label class="check"><input type="radio" name="s-visibility" value="private"> <span data-i18n="settings.private">Private</span></label>
           </fieldset>
-          <label class="check"><input id="s-list" type="checkbox"> Show in public channel list</label>
-          <label class="check"><input id="s-join" type="checkbox"> Allow people to join</label>
-          <label class="check"><input id="s-approval" type="checkbox"> Require approval to join</label>
-          <label class="check"><input id="s-speak" type="checkbox"> Allow members to speak</label>
-          <button type="submit">Save settings</button>
+          <label class="check"><input id="s-list" type="checkbox"> <span data-i18n="settings.show_public">Show in public channel list</span></label>
+          <label class="check"><input id="s-join" type="checkbox"> <span data-i18n="settings.allow_join">Allow people to join</span></label>
+          <label class="check"><input id="s-approval" type="checkbox"> <span data-i18n="settings.require_approval">Require approval to join</span></label>
+          <label class="check"><input id="s-speak" type="checkbox"> <span data-i18n="settings.allow_speak">Allow members to speak</span></label>
+          <button type="submit" data-i18n="settings.save">Save settings</button>
           <p id="settings-msg" class="form-note" hidden></p>
         </form>
 
         <section class="drawer-section">
-          <h3>Post an announcement</h3>
+          <h3 data-i18n="settings.announce_h">Post an announcement</h3>
           <form id="announce-form" class="announce-form">
-            <textarea id="announce-text" rows="3" placeholder="Write an announcement…"></textarea>
-            <button type="submit">Publish announcement</button>
+            <textarea id="announce-text" rows="3" data-i18n-placeholder="settings.announce_ph" placeholder="Write an announcement…"></textarea>
+            <button type="submit" data-i18n="settings.announce_btn">Publish announcement</button>
           </form>
         </section>
 
         <section id="pending-section" class="drawer-section" hidden>
-          <h3>Pending join requests</h3>
+          <h3 data-i18n="settings.pending_h">Pending join requests</h3>
           <ul id="pending-list" class="member-list"></ul>
         </section>
 
         <section class="drawer-section">
-          <h3>Members &amp; moderation</h3>
-          <p class="form-note">Click a name in chat to moderate that person, or manage them here.</p>
+          <h3 data-i18n="settings.members_h">Members &amp; moderation</h3>
+          <p class="form-note" data-i18n="settings.members_hint">Manage members below, or click a name in chat to mention them.</p>
           <ul id="member-list" class="member-list"></ul>
         </section>
 
         <section id="danger-section" class="drawer-section danger" hidden>
-          <h3>Danger zone</h3>
-          <button id="dissolve-btn" class="danger-button" type="button">Dissolve this channel</button>
-          <p class="form-note">The path is released for reuse; the channel ID is retired forever.</p>
+          <h3 data-i18n="settings.danger_h">Danger zone</h3>
+          <button id="dissolve-btn" class="danger-button" type="button" data-i18n="settings.dissolve">Dissolve this channel</button>
+          <p class="form-note" data-i18n="settings.dissolve_hint">The path is released for reuse; the channel ID is retired forever.</p>
         </section>
       </div>
     </div>
@@ -116,6 +131,7 @@
     <div id="lightbox-content" class="lightbox-content"></div>
   </div>
 
+  <script src="/static/i18n.js"></script>
   <script src="/static/room.js"></script>
 </body>
 </html>

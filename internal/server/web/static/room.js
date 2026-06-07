@@ -3,6 +3,8 @@
 (function () {
   "use strict";
 
+  const t = (k, v) => (window.NekoI18n ? window.NekoI18n.t(k, v) : k);
+
   const roomKey = decodeURIComponent(window.location.pathname.replace(/^\/r\//, ""));
 
   const els = {
@@ -28,6 +30,11 @@
     notifyBtn: document.getElementById("notify-btn"),
     notifyCount: document.getElementById("notify-count"),
     mentionPop: document.getElementById("mention-pop"),
+    // attachments
+    attachBar: document.getElementById("attach-bar"),
+    attachList: document.getElementById("attach-list"),
+    attachSend: document.getElementById("attach-send"),
+    attachClear: document.getElementById("attach-clear"),
     // drawer
     drawer: document.getElementById("settings-drawer"),
     settingsClose: document.getElementById("settings-close"),
@@ -54,6 +61,7 @@
   let historyLoaded = false;
   const seen = new Set();
   const participants = new Map(); // uid -> name
+  let roster = []; // authoritative member list from the server (admin view)
   const mentionHits = []; // DOM nodes mentioning me, for the bell
   let unread = 0;
 
@@ -374,6 +382,7 @@
     els.roomId.textContent = info.id ? "#" + info.id : "";
     els.roomDesc.textContent = info.description || "";
     els.roomPrivate.hidden = info.visibility !== "private";
+    els.roomPrivate.textContent = t("badge.private");
     document.title = "NekoDrop · " + (info.name || roomKey);
   }
 
@@ -381,7 +390,7 @@
     role = r;
     const isMember = r.member || r.owner;
     els.joinBtn.hidden = isMember;
-    els.joinBtn.textContent = r.pending ? "Requested ✓" : "Join";
+    els.joinBtn.textContent = r.pending ? t("room.requested") : t("room.join");
     els.joinBtn.disabled = r.pending;
     els.settingsBtn.hidden = !r.admin;
     els.dangerSection.hidden = !r.owner;
@@ -389,13 +398,11 @@
     if (r.canSpeak) {
       els.textInput.disabled = false;
       els.fileInput.disabled = false;
-      els.textInput.placeholder = "Type a message… use @ to mention";
+      els.textInput.placeholder = t("room.msg_ph");
     } else {
       els.textInput.disabled = true;
       els.fileInput.disabled = true;
-      els.textInput.placeholder = isMember
-        ? "Sending is disabled in this channel"
-        : "Join this channel to send messages";
+      els.textInput.placeholder = isMember ? t("room.send_disabled") : t("room.join_to_send");
     }
   }
 
@@ -411,6 +418,7 @@
       applyChannel(view.channel);
       applyRole(view.role);
       if (view.role.uid) me.uid = view.role.uid;
+      if (view.members) roster = view.members;
       return view;
     } catch (e) {
       return null;
@@ -421,7 +429,7 @@
   let source = null;
   function connect() {
     source = new EventSource("/api/stream/" + encodeURIComponent(roomKey));
-    source.onopen = () => setStatus(true, "connected");
+    source.onopen = () => setStatus(true, t("room.connected"));
     source.onmessage = function (e) {
       let ev;
       try { ev = JSON.parse(e.data); } catch (err) { return; }
@@ -436,15 +444,15 @@
           if (ev.channel) { applyChannel(ev.channel); refreshRole(); }
           break;
         case "dissolved":
-          setStatus(false, "channel dissolved");
-          showNotice("This channel has been dissolved by its owner. The path is now free to reuse.");
+          setStatus(false, t("room.dissolved_status"));
+          showNotice(t("room.dissolved_notice"));
           if (source) source.close();
           els.composer.hidden = true;
           break;
       }
     };
     source.onerror = function () {
-      setStatus(false, "reconnecting…");
+      setStatus(false, t("room.reconnecting"));
     };
   }
 
@@ -465,6 +473,8 @@
 
   els.composer.addEventListener("submit", function (e) {
     e.preventDefault();
+    // Send any staged attachments along with the message.
+    if (pending.length > 0) sendAttachments();
     const text = els.textInput.value.trim();
     if (!text) return;
     els.textInput.value = "";
@@ -476,26 +486,123 @@
     });
   });
 
-  async function uploadFile(file) {
+  // ---------- attachments (paste / drop / pick, with preview) ----------
+  // Files are staged and previewed before sending rather than uploaded the
+  // instant they are chosen, so a mis-paste can be removed first.
+  let pending = []; // { file, url } entries awaiting send
+
+  function stageFiles(fileList) {
+    const files = Array.prototype.slice.call(fileList || []);
+    if (files.length === 0) return;
+    files.forEach((file) => {
+      const isImage = (file.type || "").indexOf("image/") === 0;
+      pending.push({ file: file, url: isImage ? URL.createObjectURL(file) : "" });
+    });
+    renderAttachments();
+  }
+
+  function clearAttachments() {
+    pending.forEach((p) => { if (p.url) URL.revokeObjectURL(p.url); });
+    pending = [];
+    renderAttachments();
+  }
+
+  function removeAttachment(i) {
+    const p = pending[i];
+    if (p && p.url) URL.revokeObjectURL(p.url);
+    pending.splice(i, 1);
+    renderAttachments();
+  }
+
+  function renderAttachments() {
+    els.attachList.innerHTML = "";
+    if (pending.length === 0) {
+      els.attachBar.hidden = true;
+      return;
+    }
+    els.attachBar.hidden = false;
+    pending.forEach((p, i) => {
+      const li = document.createElement("li");
+      li.className = "attach-item";
+      if (p.url) {
+        const img = document.createElement("img");
+        img.className = "attach-thumb";
+        img.src = p.url;
+        img.alt = p.file.name;
+        li.appendChild(img);
+      } else {
+        const icon = document.createElement("span");
+        icon.className = "attach-icon";
+        icon.textContent = "📄";
+        li.appendChild(icon);
+      }
+      const meta = document.createElement("span");
+      meta.className = "attach-meta";
+      meta.textContent = p.file.name + " (" + formatSize(p.file.size) + ")";
+      li.appendChild(meta);
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "attach-remove";
+      rm.textContent = "✕";
+      rm.addEventListener("click", () => removeAttachment(i));
+      li.appendChild(rm);
+      els.attachList.appendChild(li);
+    });
+  }
+
+  async function uploadOne(file) {
     els.uploadBar.hidden = false;
-    els.uploadText.textContent = "Uploading " + file.name + "…";
+    els.uploadText.textContent = t("room.uploading") + " " + file.name + "…";
+    const data = new FormData();
+    data.append("sender", me.name);
+    data.append("file", file);
+    const res = await api("/api/files/" + encodeURIComponent(roomKey), { method: "POST", body: data });
+    if (!res.ok) throw new Error((await res.text()).trim() || t("room.upload_failed"));
+    els.uploadText.textContent = t("room.shared") + " " + file.name;
+  }
+
+  async function sendAttachments() {
+    if (pending.length === 0) return;
+    const items = pending.slice();
+    clearAttachments();
     try {
-      const data = new FormData();
-      data.append("sender", me.name);
-      data.append("file", file);
-      const res = await api("/api/files/" + encodeURIComponent(roomKey), { method: "POST", body: data });
-      if (!res.ok) throw new Error((await res.text()).trim() || "upload failed");
-      els.uploadText.textContent = "Shared " + file.name;
+      for (const p of items) {
+        await uploadOne(p.file);
+      }
     } catch (err) {
-      els.uploadText.textContent = "Upload failed: " + err.message;
+      els.uploadText.textContent = t("room.upload_failed") + ": " + err.message;
     } finally {
       setTimeout(() => { els.uploadBar.hidden = true; }, 2500);
     }
   }
+
   els.fileInput.addEventListener("change", function () {
-    const file = els.fileInput.files && els.fileInput.files[0];
-    if (file) uploadFile(file);
+    stageFiles(els.fileInput.files);
     els.fileInput.value = "";
+  });
+  els.attachSend.addEventListener("click", sendAttachments);
+  els.attachClear.addEventListener("click", clearAttachments);
+
+  // Paste images/files straight from the clipboard.
+  document.addEventListener("paste", function (e) {
+    if (els.textInput.disabled) return;
+    const items = (e.clipboardData && e.clipboardData.files) || [];
+    if (items.length > 0) {
+      e.preventDefault();
+      stageFiles(items);
+    }
+  });
+
+  // Drag & drop files anywhere onto the chat.
+  ["dragover", "drop"].forEach((type) => {
+    document.addEventListener(type, function (e) {
+      if (els.textInput.disabled || !e.dataTransfer) return;
+      const types = Array.prototype.slice.call(e.dataTransfer.types || []);
+      if (e.type === "drop" || types.indexOf("Files") >= 0) {
+        e.preventDefault();
+        if (e.type === "drop") stageFiles(e.dataTransfer.files);
+      }
+    });
   });
 
   // ---------- join ----------
@@ -506,8 +613,8 @@
       if (!res.ok) { showNotice((await res.text()).trim()); els.joinBtn.disabled = false; return; }
       const data = await res.json();
       if (data.pending) {
-        els.joinBtn.textContent = "Requested ✓";
-        showNotice("Your request to join was sent for approval.");
+        els.joinBtn.textContent = t("room.requested");
+        showNotice(t("room.join_pending"));
         setTimeout(() => { els.notice.hidden = true; }, 4000);
       } else {
         // Membership may unlock a private stream; reload to reconnect cleanly.
@@ -557,7 +664,7 @@
       });
       if (!res.ok) throw new Error((await res.text()).trim());
       applyChannel(await res.json());
-      els.settingsMsg.textContent = "Settings saved.";
+      els.settingsMsg.textContent = t("settings.saved");
       els.settingsMsg.hidden = false;
       setTimeout(() => { els.settingsMsg.hidden = true; }, 2500);
     } catch (err) {
@@ -592,23 +699,36 @@
     if (res.ok) {
       const data = await res.json();
       if (data.channel) applyChannel(data.channel);
+      if (data.members) roster = data.members;
       renderPending(data.pending || []);
       renderMembers();
+      // Confirm the action took effect, so moderation is never silent.
+      showNotice(t("mod.done"));
+      setTimeout(() => { els.notice.hidden = true; }, 1500);
     } else {
       showNotice((await res.text()).trim());
     }
   }
 
-  function modButton(label, action, uid, cls) {
+  function modButton(labelKey, action, uid, cls) {
     const b = document.createElement("button");
     b.type = "button";
     b.className = "mod-button" + (cls ? " " + cls : "");
-    b.textContent = label;
+    b.textContent = t(labelKey);
     b.addEventListener("click", () => moderate(action, uid));
     return b;
   }
 
+  function badge(textKey, cls) {
+    const s = document.createElement("span");
+    s.className = "member-badge " + cls;
+    s.textContent = t(textKey);
+    return s;
+  }
+
+  let lastPending = [];
   function renderPending(list) {
+    lastPending = list || [];
     els.pendingSection.hidden = !list || list.length === 0;
     els.pendingList.innerHTML = "";
     (list || []).forEach((p) => {
@@ -619,41 +739,55 @@
       li.appendChild(name);
       const actions = document.createElement("span");
       actions.className = "member-actions";
-      actions.appendChild(modButton("Approve", "approve", p.uid, "ok"));
-      actions.appendChild(modButton("Reject", "reject", p.uid));
+      actions.appendChild(modButton("mod.approve", "approve", p.uid, "ok"));
+      actions.appendChild(modButton("mod.reject", "reject", p.uid));
       li.appendChild(actions);
       els.pendingList.appendChild(li);
     });
   }
 
+  // Render the moderation roster from the server's authoritative member list,
+  // showing each person's current standing and only the actions that make sense
+  // for them. This is what makes moderation visibly take effect.
   function renderMembers() {
     els.memberList.innerHTML = "";
-    const entries = [];
-    participants.forEach((name, uid) => { if (uid !== me.uid) entries.push({ uid, name }); });
+    const entries = (roster || []).filter((m) => m.uid && m.uid !== me.uid);
     if (entries.length === 0) {
       const li = document.createElement("li");
       li.className = "member-empty";
-      li.textContent = "No other participants seen yet.";
+      li.textContent = t("settings.no_members");
       els.memberList.appendChild(li);
       return;
     }
-    entries.sort((a, b) => a.name.localeCompare(b.name));
-    entries.forEach((p) => {
+    entries.forEach((m) => {
       const li = document.createElement("li");
+
+      const head = document.createElement("span");
+      head.className = "member-head";
       const name = document.createElement("span");
       name.className = "member-name";
-      name.textContent = p.name + "#" + p.uid;
-      li.appendChild(name);
+      name.textContent = m.name + "#" + m.uid;
+      head.appendChild(name);
+      if (m.owner) head.appendChild(badge("mod.owner", "owner"));
+      else if (m.admin) head.appendChild(badge("mod.admin_badge", "admin"));
+      if (m.banned) head.appendChild(badge("mod.banned_badge", "danger"));
+      else if (m.muted) head.appendChild(badge("mod.muted_badge", "warn"));
+      li.appendChild(head);
+
       const actions = document.createElement("span");
       actions.className = "member-actions";
-      if (role && role.owner) {
-        actions.appendChild(modButton("Admin", "promote", p.uid));
-        actions.appendChild(modButton("Unadmin", "demote", p.uid));
+      if (role && role.owner && !m.owner) {
+        actions.appendChild(m.admin
+          ? modButton("mod.unadmin", "demote", m.uid)
+          : modButton("mod.admin", "promote", m.uid));
       }
-      actions.appendChild(modButton("Mute", "mute", p.uid));
-      actions.appendChild(modButton("Unmute", "unmute", p.uid));
-      actions.appendChild(modButton("Kick", "kick", p.uid));
-      actions.appendChild(modButton("Ban", "ban", p.uid, "danger"));
+      actions.appendChild(m.muted
+        ? modButton("mod.unmute", "unmute", m.uid, "ok")
+        : modButton("mod.mute", "mute", m.uid));
+      actions.appendChild(modButton("mod.kick", "kick", m.uid));
+      actions.appendChild(m.banned
+        ? modButton("mod.unban", "unban", m.uid, "ok")
+        : modButton("mod.ban", "ban", m.uid, "danger"));
       li.appendChild(actions);
       els.memberList.appendChild(li);
     });
@@ -665,18 +799,28 @@
     try {
       const res = await api("/api/channels/" + encodeURIComponent(roomKey));
       const view = await res.json();
+      if (view.members) roster = view.members;
       renderPending(view.pending || []);
+      renderMembers();
     } catch (e) { /* ignore */ }
   }
 
   els.dissolveBtn.addEventListener("click", async function () {
-    if (!window.confirm("Dissolve this channel? The path is freed and the channel ID is retired forever.")) return;
+    if (!window.confirm(t("settings.dissolve_confirm"))) return;
     const res = await api("/api/channels/" + encodeURIComponent(roomKey), { method: "DELETE" });
     if (res.ok || res.status === 204) {
       window.location.href = "/";
     } else {
       showNotice((await res.text()).trim());
     }
+  });
+
+  // Re-render dynamic, script-generated text when the language changes.
+  document.addEventListener("nekodrop:langchange", function () {
+    if (channel) applyChannel(channel);
+    if (role) applyRole(role);
+    renderPending(lastPending);
+    renderMembers();
   });
 
   // ---------- bootstrap ----------
@@ -695,8 +839,8 @@
     const view = await loadChannel();
     if (view && view.role && !view.role.canRead) {
       // Private channel we cannot read yet: gate behind a join prompt.
-      setStatus(false, "private channel");
-      showNotice("This channel is private. Join to view its contents.");
+      setStatus(false, t("room.private_status"));
+      showNotice(t("room.private_notice"));
       els.empty.hidden = true;
       return;
     }
