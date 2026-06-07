@@ -40,7 +40,7 @@ Then open <http://localhost:8080> in your browser, enter a room code (or generat
 - **Live presence** — see how many people are currently online in a channel.
 - **Text & file sharing** — send messages or drop a file; every member sees it instantly.
 - **Real-time updates** — powered by Server-Sent Events, no page refresh needed. The public directory and your own channels refresh themselves live — no manual refresh button.
-- **Multi-language UI** — English and 繁體中文 built in, switchable from a picker and remembered per browser.
+- **Multi-language UI** — English, 繁體中文, 简体中文, 日本語, Español and Русский built in. Auto-detected from the browser on first visit, switchable from a 🌐 picker, and remembered in a cookie.
 - **Paste & drop attachments** — paste an image from the clipboard or drop files onto the chat; preview and remove them before sending.
 - **Pluggable storage** — keep everything in memory (default) or persist to SQLite or MySQL so channels and history survive restarts.
 - **Configurable** — a JSON config file plus environment variables and flags control the listen address, limits and storage.

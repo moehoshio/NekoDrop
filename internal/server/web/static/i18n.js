@@ -2,8 +2,9 @@
 //
 // A tiny, dependency-free translation layer shared by every page. Static markup
 // is translated declaratively through data-i18n* attributes; dynamic strings in
-// the page scripts go through window.NekoI18n.t(). The chosen language is
-// remembered in localStorage and defaults to the browser's preference.
+// the page scripts go through window.NekoI18n.t(). On a first visit the language
+// is auto-detected from the browser's preference; once the visitor picks one by
+// hand it is remembered in a cookie.
 (function () {
   "use strict";
 
@@ -218,19 +219,489 @@
       "mod.banned_badge": "已封禁",
       "mod.done": "已完成。",
     },
+    "zh-Hans": {
+      "lang.label": "语言",
+      "app.tagline": "输入代码，即时分享文件与消息。",
+      "landing.you_are": "您是",
+      "landing.guest_hint": "（未命名访客 — 请在下方设置名称）",
+      "landing.code_label": "频道代码或路径",
+      "landing.code_ph": "例如 team-cats",
+      "landing.name_label": "您的名称",
+      "landing.optional": "（选填）",
+      "landing.name_ph": "访客",
+      "landing.join": "加入频道",
+      "landing.random": "或创建随机房间",
+      "landing.create_summary": "创建由您掌控的频道",
+      "landing.c_name_label": "频道名称",
+      "landing.c_name_ph": "Team Cats",
+      "landing.desc_label": "描述",
+      "landing.desc_ph": "这个频道是关于什么的？",
+      "landing.visibility": "可见性",
+      "landing.vis_public": "公开 — 任何人可阅读，加入后可发言",
+      "landing.vis_private": "私密 — 仅限成员",
+      "landing.show_public": "显示在公开频道列表",
+      "landing.allow_join": "允许他人加入",
+      "landing.require_approval": "加入需要审核",
+      "landing.allow_speak": "允许成员发言",
+      "landing.create": "创建频道",
+      "landing.create_err": "无法创建频道。",
+      "landing.net_err": "网络错误，请再试一次。",
+      "landing.hint": "输入相同代码的人都会加入同一个频道。分享文字与文件；其他成员可以下载您上传的任何内容。",
+      "landing.your_channels": "您的频道",
+      "landing.public_channels": "公开频道",
+      "landing.loading": "加载中…",
+      "landing.no_public": "目前还没有公开频道。在上方创建一个吧！",
+      "landing.load_err": "无法加载频道。",
+      "landing.no_owned": "您尚未创建任何频道。",
+      "directory.online": "在线",
+      "directory.member": "位成员",
+      "directory.members": "位成员",
+      "badge.private": "🔒 私密",
+      "room.leave": "离开频道",
+      "room.online_title": "在线人数",
+      "room.mentions": "提及",
+      "room.join": "加入",
+      "room.requested": "已申请 ✓",
+      "room.settings": "频道设置",
+      "room.connecting": "连接中…",
+      "room.connected": "已连接",
+      "room.reconnecting": "重新连接中…",
+      "room.private_status": "私密频道",
+      "room.dissolved_status": "频道已解散",
+      "room.empty": "还没有消息。打声招呼或上传文件吧！",
+      "room.msg_ph": "输入消息… 使用 @ 提及他人",
+      "room.send_disabled": "此频道已停用发言",
+      "room.join_to_send": "加入此频道以发送消息",
+      "room.preview": "预览",
+      "room.send": "发送",
+      "room.share_file": "分享文件",
+      "room.attach_hint": "粘贴或拖放图片与文件以附加",
+      "room.attach_send": "发送附件",
+      "room.attach_clear": "清除",
+      "room.private_notice": "此频道为私密频道。加入以查看内容。",
+      "room.join_pending": "您的加入申请已送出待审核。",
+      "room.dissolved_notice": "此频道已被所有者解散。该路径现在可重新使用。",
+      "room.uploading": "上传中",
+      "room.shared": "已分享",
+      "room.upload_failed": "上传失败",
+      "settings.title": "频道设置",
+      "settings.name": "名称",
+      "settings.desc": "描述",
+      "settings.visibility": "可见性",
+      "settings.public": "公开",
+      "settings.private": "私密",
+      "settings.show_public": "显示在公开频道列表",
+      "settings.allow_join": "允许他人加入",
+      "settings.require_approval": "加入需要审核",
+      "settings.allow_speak": "允许成员发言",
+      "settings.save": "保存设置",
+      "settings.saved": "设置已保存。",
+      "settings.announce_h": "发布公告",
+      "settings.announce_ph": "撰写公告…",
+      "settings.announce_btn": "发布公告",
+      "settings.pending_h": "待审核的加入申请",
+      "settings.members_h": "成员与管理",
+      "settings.members_hint": "在下方管理成员，或点击聊天中的名称以提及。",
+      "settings.no_members": "目前还没有成员。",
+      "settings.danger_h": "危险区域",
+      "settings.dissolve": "解散此频道",
+      "settings.dissolve_hint": "路径将被释放以供重用；频道 ID 将永久退役。",
+      "settings.dissolve_confirm": "确定要解散此频道吗？路径将被释放，频道 ID 将永久退役。",
+      "mod.approve": "批准",
+      "mod.reject": "拒绝",
+      "mod.admin": "设为管理",
+      "mod.unadmin": "取消管理",
+      "mod.mute": "禁言",
+      "mod.unmute": "取消禁言",
+      "mod.kick": "踢出",
+      "mod.ban": "封禁",
+      "mod.unban": "解除封禁",
+      "mod.owner": "所有者",
+      "mod.admin_badge": "管理员",
+      "mod.muted_badge": "已禁言",
+      "mod.banned_badge": "已封禁",
+      "mod.done": "已完成。",
+    },
+    ja: {
+      "lang.label": "言語",
+      "app.tagline": "コードを入力して、ファイルやメッセージを即座に共有。",
+      "landing.you_are": "あなたは",
+      "landing.guest_hint": "（名前未設定のゲスト — 下で名前を設定）",
+      "landing.code_label": "チャンネルコードまたはパス",
+      "landing.code_ph": "例：team-cats",
+      "landing.name_label": "あなたの名前",
+      "landing.optional": "（任意）",
+      "landing.name_ph": "ゲスト",
+      "landing.join": "チャンネルに参加",
+      "landing.random": "またはランダムな部屋を作成",
+      "landing.create_summary": "自分が管理するチャンネルを作成",
+      "landing.c_name_label": "チャンネル名",
+      "landing.c_name_ph": "Team Cats",
+      "landing.desc_label": "説明",
+      "landing.desc_ph": "このチャンネルは何についてですか？",
+      "landing.visibility": "公開設定",
+      "landing.vis_public": "公開 — 誰でも閲覧可、参加すると発言可",
+      "landing.vis_private": "非公開 — メンバーのみ",
+      "landing.show_public": "公開チャンネル一覧に表示",
+      "landing.allow_join": "参加を許可",
+      "landing.require_approval": "参加に承認を必要とする",
+      "landing.allow_speak": "メンバーの発言を許可",
+      "landing.create": "チャンネルを作成",
+      "landing.create_err": "チャンネルを作成できませんでした。",
+      "landing.net_err": "ネットワークエラー。もう一度お試しください。",
+      "landing.hint": "同じコードを入力した全員が同じチャンネルに参加します。テキストやファイルを共有でき、他のメンバーはあなたがアップロードしたものをダウンロードできます。",
+      "landing.your_channels": "あなたのチャンネル",
+      "landing.public_channels": "公開チャンネル",
+      "landing.loading": "読み込み中…",
+      "landing.no_public": "まだ公開チャンネルがありません。上で作成しましょう！",
+      "landing.load_err": "チャンネルを読み込めませんでした。",
+      "landing.no_owned": "まだチャンネルを作成していません。",
+      "directory.online": "オンライン",
+      "directory.member": "メンバー",
+      "directory.members": "メンバー",
+      "badge.private": "🔒 非公開",
+      "room.leave": "チャンネルを退出",
+      "room.online_title": "オンラインの人",
+      "room.mentions": "メンション",
+      "room.join": "参加",
+      "room.requested": "申請済み ✓",
+      "room.settings": "チャンネル設定",
+      "room.connecting": "接続中…",
+      "room.connected": "接続済み",
+      "room.reconnecting": "再接続中…",
+      "room.private_status": "非公開チャンネル",
+      "room.dissolved_status": "チャンネルは解散されました",
+      "room.empty": "まだメッセージがありません。挨拶やファイルを送ってみましょう！",
+      "room.msg_ph": "メッセージを入力… @ でメンション",
+      "room.send_disabled": "このチャンネルでは送信が無効です",
+      "room.join_to_send": "メッセージを送るにはこのチャンネルに参加してください",
+      "room.preview": "プレビュー",
+      "room.send": "送信",
+      "room.share_file": "ファイルを共有",
+      "room.attach_hint": "画像やファイルを貼り付けまたはドロップして添付",
+      "room.attach_send": "添付を送信",
+      "room.attach_clear": "クリア",
+      "room.private_notice": "このチャンネルは非公開です。内容を見るには参加してください。",
+      "room.join_pending": "参加申請を承認待ちで送信しました。",
+      "room.dissolved_notice": "このチャンネルは所有者により解散されました。パスは再利用可能になりました。",
+      "room.uploading": "アップロード中",
+      "room.shared": "共有しました",
+      "room.upload_failed": "アップロードに失敗しました",
+      "settings.title": "チャンネル設定",
+      "settings.name": "名前",
+      "settings.desc": "説明",
+      "settings.visibility": "公開設定",
+      "settings.public": "公開",
+      "settings.private": "非公開",
+      "settings.show_public": "公開チャンネル一覧に表示",
+      "settings.allow_join": "参加を許可",
+      "settings.require_approval": "参加に承認を必要とする",
+      "settings.allow_speak": "メンバーの発言を許可",
+      "settings.save": "設定を保存",
+      "settings.saved": "設定を保存しました。",
+      "settings.announce_h": "お知らせを投稿",
+      "settings.announce_ph": "お知らせを書く…",
+      "settings.announce_btn": "お知らせを公開",
+      "settings.pending_h": "承認待ちの参加申請",
+      "settings.members_h": "メンバーと管理",
+      "settings.members_hint": "下でメンバーを管理するか、チャット内の名前をクリックしてメンションできます。",
+      "settings.no_members": "まだメンバーがいません。",
+      "settings.danger_h": "危険ゾーン",
+      "settings.dissolve": "このチャンネルを解散",
+      "settings.dissolve_hint": "パスは再利用のために解放され、チャンネル ID は永久に廃止されます。",
+      "settings.dissolve_confirm": "このチャンネルを解散しますか？パスは解放され、チャンネル ID は永久に廃止されます。",
+      "mod.approve": "承認",
+      "mod.reject": "拒否",
+      "mod.admin": "管理者にする",
+      "mod.unadmin": "管理者を解除",
+      "mod.mute": "ミュート",
+      "mod.unmute": "ミュート解除",
+      "mod.kick": "追放",
+      "mod.ban": "BAN",
+      "mod.unban": "BAN解除",
+      "mod.owner": "所有者",
+      "mod.admin_badge": "管理者",
+      "mod.muted_badge": "ミュート中",
+      "mod.banned_badge": "BAN済み",
+      "mod.done": "完了しました。",
+    },
+    es: {
+      "lang.label": "Idioma",
+      "app.tagline": "Introduce un código y comparte archivos y mensajes al instante.",
+      "landing.you_are": "Eres",
+      "landing.guest_hint": "(invitado sin nombre — ponte un nombre abajo)",
+      "landing.code_label": "Código o ruta del canal",
+      "landing.code_ph": "p. ej. team-cats",
+      "landing.name_label": "Tu nombre",
+      "landing.optional": "(opcional)",
+      "landing.name_ph": "Invitado",
+      "landing.join": "Unirse al canal",
+      "landing.random": "O crear una sala aleatoria",
+      "landing.create_summary": "Crea un canal que tú controlas",
+      "landing.c_name_label": "Nombre del canal",
+      "landing.c_name_ph": "Team Cats",
+      "landing.desc_label": "Descripción",
+      "landing.desc_ph": "¿De qué trata este canal?",
+      "landing.visibility": "Visibilidad",
+      "landing.vis_public": "Público — cualquiera puede leer, únete para hablar",
+      "landing.vis_private": "Privado — solo miembros",
+      "landing.show_public": "Mostrar en la lista de canales públicos",
+      "landing.allow_join": "Permitir que la gente se una",
+      "landing.require_approval": "Requerir aprobación para unirse",
+      "landing.allow_speak": "Permitir que los miembros hablen",
+      "landing.create": "Crear canal",
+      "landing.create_err": "No se pudo crear el canal.",
+      "landing.net_err": "Error de red. Inténtalo de nuevo.",
+      "landing.hint": "Todos los que introduzcan el mismo código se unen al mismo canal. Comparte texto y archivos; otros miembros pueden descargar lo que subas.",
+      "landing.your_channels": "Tus canales",
+      "landing.public_channels": "Canales públicos",
+      "landing.loading": "Cargando…",
+      "landing.no_public": "Aún no hay canales públicos. ¡Crea uno arriba!",
+      "landing.load_err": "No se pudieron cargar los canales.",
+      "landing.no_owned": "Todavía no has creado ningún canal.",
+      "directory.online": "en línea",
+      "directory.member": "miembro",
+      "directory.members": "miembros",
+      "badge.private": "🔒 privado",
+      "room.leave": "Salir del canal",
+      "room.online_title": "Personas en línea",
+      "room.mentions": "Menciones",
+      "room.join": "Unirse",
+      "room.requested": "Solicitado ✓",
+      "room.settings": "Configuración del canal",
+      "room.connecting": "conectando…",
+      "room.connected": "conectado",
+      "room.reconnecting": "reconectando…",
+      "room.private_status": "canal privado",
+      "room.dissolved_status": "canal disuelto",
+      "room.empty": "Aún no hay mensajes. ¡Saluda o sube un archivo!",
+      "room.msg_ph": "Escribe un mensaje… usa @ para mencionar",
+      "room.send_disabled": "El envío está desactivado en este canal",
+      "room.join_to_send": "Únete a este canal para enviar mensajes",
+      "room.preview": "vista previa",
+      "room.send": "Enviar",
+      "room.share_file": "Compartir un archivo",
+      "room.attach_hint": "Pega o suelta imágenes y archivos para adjuntar",
+      "room.attach_send": "Enviar adjuntos",
+      "room.attach_clear": "Limpiar",
+      "room.private_notice": "Este canal es privado. Únete para ver su contenido.",
+      "room.join_pending": "Tu solicitud para unirte se envió para aprobación.",
+      "room.dissolved_notice": "Este canal ha sido disuelto por su propietario. La ruta ahora está libre para reutilizar.",
+      "room.uploading": "Subiendo",
+      "room.shared": "Compartido",
+      "room.upload_failed": "Error al subir",
+      "settings.title": "Configuración del canal",
+      "settings.name": "Nombre",
+      "settings.desc": "Descripción",
+      "settings.visibility": "Visibilidad",
+      "settings.public": "Público",
+      "settings.private": "Privado",
+      "settings.show_public": "Mostrar en la lista de canales públicos",
+      "settings.allow_join": "Permitir que la gente se una",
+      "settings.require_approval": "Requerir aprobación para unirse",
+      "settings.allow_speak": "Permitir que los miembros hablen",
+      "settings.save": "Guardar configuración",
+      "settings.saved": "Configuración guardada.",
+      "settings.announce_h": "Publicar un anuncio",
+      "settings.announce_ph": "Escribe un anuncio…",
+      "settings.announce_btn": "Publicar anuncio",
+      "settings.pending_h": "Solicitudes de unión pendientes",
+      "settings.members_h": "Miembros y moderación",
+      "settings.members_hint": "Gestiona los miembros abajo, o haz clic en un nombre del chat para mencionarlo.",
+      "settings.no_members": "Aún no hay miembros.",
+      "settings.danger_h": "Zona de peligro",
+      "settings.dissolve": "Disolver este canal",
+      "settings.dissolve_hint": "La ruta se libera para reutilizar; el ID del canal se retira para siempre.",
+      "settings.dissolve_confirm": "¿Disolver este canal? La ruta se libera y el ID del canal se retira para siempre.",
+      "mod.approve": "Aprobar",
+      "mod.reject": "Rechazar",
+      "mod.admin": "Hacer admin",
+      "mod.unadmin": "Quitar admin",
+      "mod.mute": "Silenciar",
+      "mod.unmute": "Reactivar",
+      "mod.kick": "Expulsar",
+      "mod.ban": "Banear",
+      "mod.unban": "Desbanear",
+      "mod.owner": "propietario",
+      "mod.admin_badge": "admin",
+      "mod.muted_badge": "silenciado",
+      "mod.banned_badge": "baneado",
+      "mod.done": "Hecho.",
+    },
+    ru: {
+      "lang.label": "Язык",
+      "app.tagline": "Введите код и мгновенно делитесь файлами и сообщениями.",
+      "landing.you_are": "Вы",
+      "landing.guest_hint": "(гость без имени — задайте имя ниже)",
+      "landing.code_label": "Код или путь канала",
+      "landing.code_ph": "например, team-cats",
+      "landing.name_label": "Ваше имя",
+      "landing.optional": "(необязательно)",
+      "landing.name_ph": "Гость",
+      "landing.join": "Войти в канал",
+      "landing.random": "Или создать случайную комнату",
+      "landing.create_summary": "Создайте канал под вашим управлением",
+      "landing.c_name_label": "Название канала",
+      "landing.c_name_ph": "Team Cats",
+      "landing.desc_label": "Описание",
+      "landing.desc_ph": "О чём этот канал?",
+      "landing.visibility": "Видимость",
+      "landing.vis_public": "Публичный — любой может читать, войдите, чтобы писать",
+      "landing.vis_private": "Приватный — только участники",
+      "landing.show_public": "Показывать в списке публичных каналов",
+      "landing.allow_join": "Разрешить присоединение",
+      "landing.require_approval": "Требовать одобрение для входа",
+      "landing.allow_speak": "Разрешить участникам писать",
+      "landing.create": "Создать канал",
+      "landing.create_err": "Не удалось создать канал.",
+      "landing.net_err": "Ошибка сети. Попробуйте ещё раз.",
+      "landing.hint": "Все, кто ввёл один и тот же код, попадают в один канал. Делитесь текстом и файлами; другие участники могут скачать всё, что вы загрузите.",
+      "landing.your_channels": "Ваши каналы",
+      "landing.public_channels": "Публичные каналы",
+      "landing.loading": "Загрузка…",
+      "landing.no_public": "Пока нет публичных каналов. Создайте его выше!",
+      "landing.load_err": "Не удалось загрузить каналы.",
+      "landing.no_owned": "Вы ещё не создали ни одного канала.",
+      "directory.online": "в сети",
+      "directory.member": "участник",
+      "directory.members": "участников",
+      "badge.private": "🔒 приватный",
+      "room.leave": "Покинуть канал",
+      "room.online_title": "Люди в сети",
+      "room.mentions": "Упоминания",
+      "room.join": "Войти",
+      "room.requested": "Запрошено ✓",
+      "room.settings": "Настройки канала",
+      "room.connecting": "подключение…",
+      "room.connected": "подключено",
+      "room.reconnecting": "переподключение…",
+      "room.private_status": "приватный канал",
+      "room.dissolved_status": "канал распущен",
+      "room.empty": "Сообщений пока нет. Поздоровайтесь или загрузите файл!",
+      "room.msg_ph": "Введите сообщение… используйте @ для упоминания",
+      "room.send_disabled": "Отправка в этом канале отключена",
+      "room.join_to_send": "Войдите в этот канал, чтобы отправлять сообщения",
+      "room.preview": "предпросмотр",
+      "room.send": "Отправить",
+      "room.share_file": "Поделиться файлом",
+      "room.attach_hint": "Вставьте или перетащите изображения и файлы для вложения",
+      "room.attach_send": "Отправить вложения",
+      "room.attach_clear": "Очистить",
+      "room.private_notice": "Этот канал приватный. Войдите, чтобы увидеть его содержимое.",
+      "room.join_pending": "Ваш запрос на вход отправлен на одобрение.",
+      "room.dissolved_notice": "Этот канал распущен его владельцем. Путь теперь свободен для повторного использования.",
+      "room.uploading": "Загрузка",
+      "room.shared": "Отправлено",
+      "room.upload_failed": "Ошибка загрузки",
+      "settings.title": "Настройки канала",
+      "settings.name": "Название",
+      "settings.desc": "Описание",
+      "settings.visibility": "Видимость",
+      "settings.public": "Публичный",
+      "settings.private": "Приватный",
+      "settings.show_public": "Показывать в списке публичных каналов",
+      "settings.allow_join": "Разрешить присоединение",
+      "settings.require_approval": "Требовать одобрение для входа",
+      "settings.allow_speak": "Разрешить участникам писать",
+      "settings.save": "Сохранить настройки",
+      "settings.saved": "Настройки сохранены.",
+      "settings.announce_h": "Опубликовать объявление",
+      "settings.announce_ph": "Напишите объявление…",
+      "settings.announce_btn": "Опубликовать объявление",
+      "settings.pending_h": "Ожидающие запросы на вход",
+      "settings.members_h": "Участники и модерация",
+      "settings.members_hint": "Управляйте участниками ниже или нажмите на имя в чате, чтобы упомянуть его.",
+      "settings.no_members": "Пока нет участников.",
+      "settings.danger_h": "Опасная зона",
+      "settings.dissolve": "Распустить этот канал",
+      "settings.dissolve_hint": "Путь освобождается для повторного использования; ID канала выводится из обращения навсегда.",
+      "settings.dissolve_confirm": "Распустить этот канал? Путь освобождается, а ID канала выводится из обращения навсегда.",
+      "mod.approve": "Одобрить",
+      "mod.reject": "Отклонить",
+      "mod.admin": "Назначить админом",
+      "mod.unadmin": "Снять админа",
+      "mod.mute": "Заглушить",
+      "mod.unmute": "Снять заглушение",
+      "mod.kick": "Выгнать",
+      "mod.ban": "Забанить",
+      "mod.unban": "Разбанить",
+      "mod.owner": "владелец",
+      "mod.admin_badge": "админ",
+      "mod.muted_badge": "заглушён",
+      "mod.banned_badge": "забанен",
+      "mod.done": "Готово.",
+    },
   };
 
-  const STORAGE_KEY = "nekodrop.lang";
+  // BCP-47 lang attribute applied to <html> for each supported language.
+  const HTML_LANG = {
+    en: "en",
+    zh: "zh-Hant",
+    "zh-Hans": "zh-Hans",
+    ja: "ja",
+    es: "es",
+    ru: "ru",
+  };
 
-  function detect() {
+  const COOKIE_KEY = "nekodrop_lang";
+  const COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // one year, in seconds
+
+  function readCookie(name) {
+    const match = document.cookie.match(
+      new RegExp("(?:^|; )" + name + "=([^;]*)")
+    );
+    return match ? decodeURIComponent(match[1]) : null;
+  }
+
+  function writeCookie(name, value) {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved && DICT[saved]) return saved;
+      document.cookie =
+        name +
+        "=" +
+        encodeURIComponent(value) +
+        "; path=/; max-age=" +
+        COOKIE_MAX_AGE +
+        "; SameSite=Lax";
     } catch (e) {
       /* ignore */
     }
-    const nav = (navigator.language || "en").toLowerCase();
-    if (nav.indexOf("zh") === 0) return "zh";
+  }
+
+  // Map a browser language tag (e.g. "zh-CN", "ja", "es-MX") to a supported code.
+  function matchBrowserLang(tag) {
+    const t = (tag || "").toLowerCase();
+    if (!t) return null;
+    if (t.indexOf("zh") === 0) {
+      // Simplified for mainland China & Singapore, Traditional otherwise.
+      if (
+        t.indexOf("hans") !== -1 ||
+        t.indexOf("cn") !== -1 ||
+        t.indexOf("sg") !== -1
+      ) {
+        return "zh-Hans";
+      }
+      return "zh";
+    }
+    if (t.indexOf("ja") === 0) return "ja";
+    if (t.indexOf("es") === 0) return "es";
+    if (t.indexOf("ru") === 0) return "ru";
+    if (t.indexOf("en") === 0) return "en";
+    return null;
+  }
+
+  // First visit: auto-detect from the browser. Returning visitors who picked a
+  // language by hand are remembered through a cookie.
+  function detect() {
+    const saved = readCookie(COOKIE_KEY);
+    if (saved && DICT[saved]) return saved;
+
+    const candidates = navigator.languages && navigator.languages.length
+      ? navigator.languages
+      : [navigator.language || "en"];
+    for (let i = 0; i < candidates.length; i++) {
+      const m = matchBrowserLang(candidates[i]);
+      if (m) return m;
+    }
     return "en";
   }
 
@@ -259,17 +730,13 @@
     scope.querySelectorAll("[data-i18n-title]").forEach((el) => {
       el.setAttribute("title", t(el.getAttribute("data-i18n-title")));
     });
-    document.documentElement.setAttribute("lang", lang === "zh" ? "zh-Hant" : "en");
+    document.documentElement.setAttribute("lang", HTML_LANG[lang] || "en");
   }
 
   function setLang(next) {
     if (!DICT[next]) return;
     lang = next;
-    try {
-      localStorage.setItem(STORAGE_KEY, next);
-    } catch (e) {
-      /* ignore */
-    }
+    writeCookie(COOKIE_KEY, next);
     apply();
     document.dispatchEvent(new CustomEvent("nekodrop:langchange", { detail: { lang: lang } }));
   }
