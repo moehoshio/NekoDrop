@@ -30,12 +30,15 @@ Then open <http://localhost:8080> in your browser, enter a room code (or generat
 ## Features
 
 - **Channels by path or code** — visit `/r/<code>` or type the same code on the landing page to join the same channel. Codes are normalized (`Team Cats` → `team-cats`). Every channel also gets a permanent, unique ID shown after its name (e.g. `Team Cats #8d1272`).
-- **Lightweight identities** — every visitor is issued a stable UID rendered after their nickname (`alice#123`). No password or sign-up.
+- **Lightweight identities** — every visitor is issued a stable UID rendered after their nickname (`alice#123`). No password or sign-up. Messages are keyed by UID, never by name, so renaming yourself relabels all of your past messages instead of looking like a new person.
+- **Per-channel nicknames** — set a display nickname that applies only to one channel from the box left of the composer; leave it empty to fall back to your global name. Changing it updates your existing messages in that channel live.
 - **Public & private channels** — *public* channels can be read by anyone; *private* channels are members-only.
 - **Owner & admin controls** — the creator sets the name, description, visibility, join policy, and speak permission. They can promote admins, ban/mute/kick members, approve join requests, and dissolve the channel.
 - **Public channel directory** — opt a channel into the home-page list with *Show in public list*.
 - **Announcements** — owners and admins pin notices to the top of a channel.
-- **@-mentions** — type `@` to pick a participant; you get a 🔔 notification with click-to-locate when you are mentioned.
+- **@-mentions** — type `@` to pick a participant, or click anyone's name in chat to mention them. Mentions target a UID rather than a name, so they keep pointing at the same person after a rename. You get a 🔔 notification with click-to-locate when you are mentioned.
+- **Replies** — reply to an earlier message; the reply shows a quote of the original that you can click to jump straight to it.
+- **Joined channels** — the landing page lists the channels you have joined (alongside the ones you own), so you can return to them without remembering the code.
 - **Inline media & link previews** — images, video and audio appear inline and open in a lightbox.
 - **Live presence** — see how many people are currently online in a channel.
 - **Text & file sharing** — send messages or drop a file; every member sees it instantly.
@@ -150,7 +153,7 @@ The web UI is the primary interface, but the underlying HTTP API is straightforw
 | `GET /r/{room}` | Channel page |
 | `GET /api/me` | Current identity (`{uid,name,named}`); sets the cookie |
 | `POST /api/me` | Update display name (`{"name"}`); UID is unchanged |
-| `GET /api/channels` | Public directory (`channels`) plus your own channels (`mine`) |
+| `GET /api/channels` | Public directory (`channels`), your own channels (`mine`) and channels you have joined (`joined`) |
 | `POST /api/channels` | Create an owned channel (name, visibility, settings…) |
 | `GET /api/channels/{room}` | Channel metadata + your role (+ pending & member roster if admin) |
 | `PATCH /api/channels/{room}` | Update settings (owner/admin) |
@@ -160,8 +163,8 @@ The web UI is the primary interface, but the underlying HTTP API is straightforw
 | `POST /api/channels/{room}/moderate` | Moderation action (`{action,uid}`): promote, demote, ban, unban, mute, unmute, kick, approve, reject |
 | `POST /api/channels/{room}/announcements` | Post an announcement (owner/admin) |
 | `GET /api/stream/{room}` | Server-Sent Events stream (announcements, history, presence + live events) |
-| `POST /api/messages/{room}` | Send a text message (`{sender,text,preview}`) |
-| `POST /api/files/{room}` | Upload a file (multipart `file`, `sender`, optional `text` caption + `preview`) |
+| `POST /api/messages/{room}` | Send a text message (`{sender,text,preview}`, optional `nick` per-channel name and `replyTo` message ID) |
+| `POST /api/files/{room}` | Upload a file (multipart `file`, `sender`, optional `nick`, `text` caption, `preview` and `replyTo`) |
 | `GET /api/files/{room}/{id}` | Download a shared file (`?inline=1` renders whitelisted media inline) |
 
 ## Releases

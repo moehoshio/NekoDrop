@@ -21,7 +21,13 @@
     notice: document.getElementById("notice"),
     composer: document.getElementById("composer"),
     textInput: document.getElementById("text-input"),
+    nickInput: document.getElementById("nick-input"),
     fileInput: document.getElementById("file-input"),
+    replyBar: document.getElementById("reply-bar"),
+    replyWho: document.getElementById("reply-who"),
+    replySnippet: document.getElementById("reply-snippet"),
+    replyJump: document.getElementById("reply-jump"),
+    replyCancel: document.getElementById("reply-cancel"),
     uploadBar: document.getElementById("upload-bar"),
     uploadText: document.getElementById("upload-text"),
     joinBtn: document.getElementById("join-btn"),
@@ -60,9 +66,13 @@
   let historyLoaded = false;
   const seen = new Set();
   const participants = new Map(); // uid -> name
+  const messages = new Map(); // id -> { uid, text, fileName, kind } for reply lookup
   let roster = []; // authoritative member list from the server (admin view)
   const mentionHits = []; // DOM nodes mentioning me, for the bell
   let unread = 0;
+  let replyTarget = null; // { id, uid } the next message replies to
+
+  const NICK_KEY = "nekodrop_nick:" + roomKey;
 
   const MENTION_RE = /@[^\s#@]+#(\d+)/g;
   const URL_RE = /(https?:\/\/[^\s]+)/g;
@@ -98,7 +108,34 @@
   }
 
   function remember(uid, name) {
-    if (uid && name) participants.set(uid, name);
+    if (uid && name && participants.get(uid) !== name) {
+      participants.set(uid, name);
+      relabel(uid, name);
+    }
+  }
+
+  // Messages are keyed by UID, so when a user's display name (global name or
+  // per-channel nickname) changes we re-render every label that referenced them
+  // — their authored messages, @-mentions of them, and reply snippets — so the
+  // whole history reflects the new name rather than the one captured at send.
+  function relabel(uid, name) {
+    if (!uid || !name) return;
+    document.querySelectorAll('.who[data-uid="' + cssEscape(uid) + '"]').forEach((el) => {
+      el.textContent = name + "#" + uid;
+    });
+    document.querySelectorAll('.mention[data-uid="' + cssEscape(uid) + '"]').forEach((el) => {
+      el.textContent = "@" + name + "#" + uid;
+    });
+    document.querySelectorAll('.reply-quote[data-uid="' + cssEscape(uid) + '"] .reply-who').forEach((el) => {
+      el.textContent = name + "#" + uid;
+    });
+    if (replyTarget && replyTarget.uid === uid && !els.replyBar.hidden) {
+      els.replyWho.textContent = name + "#" + uid;
+    }
+  }
+
+  function cssEscape(s) {
+    return String(s).replace(/["\\]/g, "\\$&");
   }
 
   // ---------- lightbox ----------
@@ -148,7 +185,11 @@
       }
       const span = document.createElement("span");
       span.className = "mention";
-      span.textContent = m[0];
+      span.dataset.uid = m[1];
+      // Render the mentioned user's current display name when known, so renaming
+      // updates past mentions; fall back to the literal text otherwise.
+      const known = participants.get(m[1]);
+      span.textContent = known ? "@" + known + "#" + m[1] : m[0];
       if (m[1] === me.uid) {
         span.classList.add("mention-self");
         mentionsMe = true;
@@ -208,18 +249,26 @@
   function render(msg) {
     if (!msg || !msg.id || seen.has(msg.id)) return;
     seen.add(msg.id);
+    messages.set(msg.id, {
+      uid: msg.senderUid,
+      text: msg.text || "",
+      fileName: msg.fileName || "",
+      kind: msg.kind,
+    });
     els.empty.hidden = true;
     remember(msg.senderUid, msg.sender);
 
     const item = document.createElement("div");
     item.className = "message";
     item.dataset.id = msg.id;
+    if (msg.senderUid) item.dataset.uid = msg.senderUid;
 
     const meta = document.createElement("div");
     meta.className = "meta";
     const who = document.createElement("button");
     who.type = "button";
     who.className = "who";
+    if (msg.senderUid) who.dataset.uid = msg.senderUid;
     who.textContent = (msg.sender || "anonymous") + (msg.senderUid ? "#" + msg.senderUid : "");
     who.title = "Mention or moderate";
     who.addEventListener("click", () => onAuthorClick(msg.senderUid, msg.sender));
@@ -228,10 +277,24 @@
     when.textContent = formatTime(msg.time);
     meta.appendChild(who);
     meta.appendChild(when);
+    // A reply action lets this message be quoted by the next one sent.
+    const replyBtn = document.createElement("button");
+    replyBtn.type = "button";
+    replyBtn.className = "reply-action";
+    replyBtn.textContent = "↩";
+    replyBtn.title = t("room.reply");
+    replyBtn.addEventListener("click", () => startReply(msg.id));
+    meta.appendChild(replyBtn);
     item.appendChild(meta);
 
     const body = document.createElement("div");
     body.className = "body";
+
+    // When this message replies to an earlier one, show a clickable quote that
+    // navigates to the referenced message.
+    if (msg.replyTo) {
+      body.appendChild(buildReplyQuote(msg.replyTo));
+    }
 
     // A message may carry text, a file, or both: a file sent with a describing
     // caption is a single message that renders the caption alongside the file.
@@ -377,14 +440,78 @@
     setTimeout(() => { els.mentionPop.hidden = true; }, 150);
   });
 
-  // Click a chat author to mention them (and, for admins, offer moderation).
+  // Click a chat author to mention them. Mentions are keyed by UID, so the
+  // inserted token always carries the author's current display name.
   function onAuthorClick(uid, name) {
     if (!uid || uid === me.uid) return;
-    remember(uid, name);
-    const token = "@" + name + "#" + uid + " ";
+    const display = participants.get(uid) || name;
+    remember(uid, display);
+    const token = "@" + display + "#" + uid + " ";
     els.textInput.value += (els.textInput.value && !/\s$/.test(els.textInput.value) ? " " : "") + token;
     els.textInput.focus();
   }
+
+  // ---------- replies ----------
+  // Build the quoted-reply block shown at the top of a message that replies to
+  // an earlier one. Clicking it navigates to the referenced message.
+  function buildReplyQuote(replyTo) {
+    const quote = document.createElement("button");
+    quote.type = "button";
+    quote.className = "reply-quote";
+    const ref = messages.get(replyTo);
+    const who = document.createElement("span");
+    who.className = "reply-who";
+    const snippet = document.createElement("span");
+    snippet.className = "reply-snippet";
+    if (ref) {
+      if (ref.uid) quote.dataset.uid = ref.uid;
+      who.textContent = (participants.get(ref.uid) || "anonymous") + (ref.uid ? "#" + ref.uid : "");
+      snippet.textContent = replySnippetText(ref);
+    } else {
+      who.textContent = "";
+      snippet.textContent = t("room.reply_unavailable");
+    }
+    quote.appendChild(who);
+    quote.appendChild(snippet);
+    quote.addEventListener("click", () => jumpToMessage(replyTo));
+    return quote;
+  }
+
+  function replySnippetText(ref) {
+    const text = (ref.text || "").replace(/\s+/g, " ").trim();
+    if (text) return text.length > 80 ? text.slice(0, 80) + "…" : text;
+    if (ref.kind === "file" && ref.fileName) return "📎 " + ref.fileName;
+    return "";
+  }
+
+  function jumpToMessage(id) {
+    const target = els.messages.querySelector('[data-id="' + cssEscape(id) + '"]');
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    target.classList.add("flash");
+    setTimeout(() => target.classList.remove("flash"), 1500);
+  }
+
+  // Stage a reply to the given message: the next message sent will reference it.
+  function startReply(id) {
+    const ref = messages.get(id);
+    if (!ref) return;
+    replyTarget = { id: id, uid: ref.uid };
+    els.replyWho.textContent = (participants.get(ref.uid) || "anonymous") + (ref.uid ? "#" + ref.uid : "");
+    els.replySnippet.textContent = replySnippetText(ref);
+    els.replyBar.hidden = false;
+    els.textInput.focus();
+  }
+
+  function cancelReply() {
+    replyTarget = null;
+    els.replyBar.hidden = true;
+  }
+
+  els.replyCancel.addEventListener("click", cancelReply);
+  els.replyJump.addEventListener("click", function () {
+    if (replyTarget) jumpToMessage(replyTarget.id);
+  });
 
   // ---------- channel info & roles ----------
   function applyChannel(info) {
@@ -409,10 +536,12 @@
     if (r.canSpeak) {
       els.textInput.disabled = false;
       els.fileInput.disabled = false;
+      if (els.nickInput) els.nickInput.disabled = false;
       els.textInput.placeholder = t("room.msg_ph");
     } else {
       els.textInput.disabled = true;
       els.fileInput.disabled = true;
+      if (els.nickInput) els.nickInput.disabled = true;
       els.textInput.placeholder = isMember ? t("room.send_disabled") : t("room.join_to_send");
     }
   }
@@ -447,6 +576,9 @@
       switch (ev.type) {
         case "message": render(ev.message); break;
         case "announcement": renderAnnouncement(ev.announcement); break;
+        case "identity":
+          if (ev.identity) remember(ev.identity.uid, ev.identity.name);
+          break;
         case "presence":
           els.online.textContent = "🟢 " + (ev.online || 0);
           if (!historyLoaded) historyLoaded = true; // history fully replayed
@@ -472,15 +604,40 @@
     if (view && view.role.admin) loadDrawerState();
   }
 
+  // ---------- nickname (per-channel display name) ----------
+  // The channel nickname is remembered locally per channel; an empty value means
+  // "use my global name". It travels with every message I send so others see it.
+  function currentNick() {
+    return els.nickInput ? els.nickInput.value.trim() : "";
+  }
+  function loadNick() {
+    if (!els.nickInput) return;
+    try {
+      const saved = window.localStorage.getItem(NICK_KEY);
+      if (saved) els.nickInput.value = saved;
+    } catch (e) { /* ignore */ }
+  }
+  function persistNick() {
+    try {
+      const v = currentNick();
+      if (v) window.localStorage.setItem(NICK_KEY, v);
+      else window.localStorage.removeItem(NICK_KEY);
+    } catch (e) { /* ignore */ }
+  }
+  if (els.nickInput) els.nickInput.addEventListener("change", persistNick);
+
   // ---------- sending ----------
   async function sendText(text) {
+    const payload = { sender: me.name, nick: currentNick(), text: text, preview: true };
+    if (replyTarget) payload.replyTo = replyTarget.id;
     const res = await api("/api/messages/" + encodeURIComponent(roomKey), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // Links & media are always rendered inline now that the preview toggle is gone.
-      body: JSON.stringify({ sender: me.name, text: text, preview: true }),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) throw new Error((await res.text()).trim() || "send failed");
+    cancelReply();
   }
 
   els.composer.addEventListener("submit", function (e) {
@@ -645,12 +802,14 @@
     showLightbox(box);
   }
 
-  async function uploadOne(file, caption) {
+  async function uploadOne(file, caption, replyTo) {
     els.uploadBar.hidden = false;
     els.uploadText.textContent = t("room.uploading") + " " + file.name + "…";
     const data = new FormData();
     data.append("sender", me.name);
+    data.append("nick", currentNick());
     data.append("file", file);
+    if (replyTo) data.append("replyTo", replyTo);
     if (caption) {
       data.append("text", caption);
       data.append("preview", "1");
@@ -666,10 +825,14 @@
   async function sendAttachments(caption) {
     if (pending.length === 0) return;
     const items = pending.slice();
+    // The reply (like the caption) is attached to the first file so the file and
+    // its context arrive as a single message.
+    const replyTo = replyTarget ? replyTarget.id : "";
     clearAttachments();
+    cancelReply();
     try {
       for (let i = 0; i < items.length; i++) {
-        await uploadOne(items[i].file, i === 0 ? caption : "");
+        await uploadOne(items[i].file, i === 0 ? caption : "", i === 0 ? replyTo : "");
       }
     } catch (err) {
       els.uploadText.textContent = t("room.upload_failed") + ": " + err.message;
@@ -943,6 +1106,7 @@
   }
 
   (async function init() {
+    loadNick();
     await loadMe();
     const view = await loadChannel();
     if (view && view.role && !view.role.canRead) {

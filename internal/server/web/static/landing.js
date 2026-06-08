@@ -15,6 +15,8 @@
   const channelList = document.getElementById("channel-list");
   const mineCard = document.getElementById("mine-card");
   const mineList = document.getElementById("mine-list");
+  const joinedCard = document.getElementById("joined-card");
+  const joinedList = document.getElementById("joined-list");
 
   let me = null;
 
@@ -217,12 +219,19 @@
       const data = await res.json();
       const channels = (data && data.channels) || [];
       const mine = (data && data.mine) || [];
+      const joined = (data && data.joined) || [];
       renderList(channelList, channels, "landing.no_public");
       if (mine.length > 0) {
         mineCard.hidden = false;
         renderList(mineList, mine, "landing.no_owned");
       } else {
         mineCard.hidden = true;
+      }
+      if (joined.length > 0) {
+        joinedCard.hidden = false;
+        renderList(joinedList, joined, "landing.no_joined");
+      } else {
+        joinedCard.hidden = true;
       }
     } catch (e) {
       channelList.dataset.sig = "";
@@ -245,6 +254,7 @@
     renderMe();
     channelList.dataset.sig = "";
     mineList.dataset.sig = "";
+    joinedList.dataset.sig = "";
     loadChannels();
   });
 })();
