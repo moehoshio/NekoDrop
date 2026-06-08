@@ -37,7 +37,7 @@ func TestFileBytesAreBounded(t *testing.T) {
 	payload := make([]byte, 1024)
 	var ids []string
 	for i := 0; i < 10; i++ {
-		m := r.AddFile("bob", "101", "f"+strconv.Itoa(i)+".bin", "application/octet-stream", payload)
+		m := r.AddFile("bob", "101", "f"+strconv.Itoa(i)+".bin", "application/octet-stream", payload, "", nil, false)
 		ids = append(ids, m.FileID)
 	}
 

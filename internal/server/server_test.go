@@ -145,6 +145,50 @@ func TestUploadAndDownload(t *testing.T) {
 	}
 }
 
+func TestUploadWithCaptionIsSingleMessage(t *testing.T) {
+	s := newTestServer(t)
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	_ = mw.WriteField("sender", "bob")
+	_ = mw.WriteField("text", "look at this @cat#42")
+	_ = mw.WriteField("preview", "1")
+	fw, err := mw.CreateFormFile("file", "photo.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write([]byte("img-bytes")); err != nil {
+		t.Fatal(err)
+	}
+	mw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/files/demo", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("upload status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var msg room.Message
+	if err := json.Unmarshal(rec.Body.Bytes(), &msg); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// A file sent with a caption is one file message carrying the text, its
+	// parsed mentions, and the preview flag.
+	if msg.Kind != room.KindFile || msg.FileName != "photo.png" {
+		t.Fatalf("unexpected message: %+v", msg)
+	}
+	if msg.Text != "look at this @cat#42" {
+		t.Fatalf("caption not attached: %q", msg.Text)
+	}
+	if !msg.Preview {
+		t.Fatalf("preview flag not set on captioned file")
+	}
+	if len(msg.Mentions) != 1 || msg.Mentions[0] != "42" {
+		t.Fatalf("caption mentions = %v, want [42]", msg.Mentions)
+	}
+}
+
 func TestUploadTooLarge(t *testing.T) {
 	s, err := New(Options{MaxUploadBytes: 8})
 	if err != nil {

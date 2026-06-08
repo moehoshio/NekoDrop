@@ -9,6 +9,33 @@
   --ok: #4ade80;
   --danger: #f87171;
   --radius: 14px;
+
+  /* Theme-dependent decorations resolved per colour scheme below. */
+  --glow: #2a2c55;
+  --hairline: rgba(255, 255, 255, 0.06);
+  --hairline-strong: rgba(255, 255, 255, 0.1);
+  --control-bg: rgba(255, 255, 255, 0.08);
+  --on-accent: #14152b;
+}
+
+/* Day mode. The effective theme is set on <html data-theme> by theme.js, which
+   resolves the visitor's auto/dark/light choice (auto follows the OS). */
+:root[data-theme="light"] {
+  --bg: #eef0f8;
+  --panel: #ffffff;
+  --panel-2: #eceefb;
+  --accent: #e8519a;
+  --accent-2: #0bafc0;
+  --text: #1b1c2b;
+  --muted: #5c6180;
+  --ok: #15a05a;
+  --danger: #dc2626;
+
+  --glow: #dfe3fb;
+  --hairline: rgba(20, 21, 43, 0.08);
+  --hairline-strong: rgba(20, 21, 43, 0.14);
+  --control-bg: rgba(20, 21, 43, 0.06);
+  --on-accent: #ffffff;
 }
 
 * { box-sizing: border-box; }
@@ -26,7 +53,7 @@ html, body {
   background-color: var(--bg);
   /* Pin the glow to the viewport and stretch it to cover, so it never tiles or
      repeats when the page grows taller (e.g. when the create panel expands). */
-  background-image: radial-gradient(1200px 600px at 10% -10%, #2a2c55 0%, var(--bg) 55%);
+  background-image: radial-gradient(1200px 600px at 10% -10%, var(--glow) 0%, var(--bg) 55%);
   background-repeat: no-repeat;
   background-attachment: fixed;
   background-size: cover;
@@ -54,7 +81,7 @@ body.landing {
 .card {
   width: 100%;
   background: var(--panel);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--hairline);
   border-radius: var(--radius);
   padding: 28px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
@@ -76,12 +103,12 @@ body.landing {
   margin-top: 14px;
   padding: 12px;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  color: #14152b;
+  color: var(--on-accent);
   font-weight: 600;
 }
 
 .visibility {
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--hairline-strong);
   border-radius: 10px;
   padding: 10px 12px;
   margin: 8px 0 2px;
@@ -123,7 +150,7 @@ body.landing {
   text-decoration: none;
   color: var(--text);
   background: var(--panel-2);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--hairline);
   border-radius: 10px;
   padding: 12px 14px;
   transition: border-color 0.15s;
@@ -134,7 +161,7 @@ body.landing {
 .channel-id { color: var(--muted); font-size: 0.8rem; }
 .channel-badge {
   font-size: 0.7rem;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--control-bg);
   padding: 2px 6px;
   border-radius: 6px;
   color: var(--muted);
@@ -154,7 +181,7 @@ input[type="text"] {
   width: 100%;
   padding: 12px 14px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--hairline-strong);
   background: var(--panel-2);
   color: var(--text);
   font-size: 1rem;
@@ -200,7 +227,7 @@ button:focus-visible {
 .ghost-button {
   background: transparent;
   color: var(--muted);
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid var(--hairline-strong);
   padding: 8px 14px;
   font-size: 0.85rem;
 }
@@ -216,7 +243,7 @@ input[type="radio"] {
   height: 20px;
   margin: 0;
   background: var(--panel-2);
-  border: 1.5px solid rgba(255, 255, 255, 0.22);
+  border: 1.5px solid var(--hairline-strong);
   cursor: pointer;
   display: inline-grid;
   place-content: center;
@@ -232,7 +259,7 @@ input[type="checkbox"]::before {
   height: 11px;
   transform: scale(0);
   transition: transform 0.12s ease-in-out;
-  background: #14152b;
+  background: var(--on-accent);
   clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
 }
 input[type="radio"]::before {
@@ -242,12 +269,15 @@ input[type="radio"]::before {
   border-radius: 50%;
   transform: scale(0);
   transition: transform 0.12s ease-in-out;
-  background: #14152b;
+  background: var(--on-accent);
 }
+/* Checked state deliberately uses a flat, solid accent fill — not the gradient
+   used by the action buttons — so a ticked checkbox reads as a form control
+   rather than a tiny button. */
 input[type="checkbox"]:checked,
 input[type="radio"]:checked {
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  border-color: transparent;
+  background: var(--accent);
+  border-color: var(--accent);
 }
 input[type="checkbox"]:checked::before,
 input[type="radio"]:checked::before { transform: scale(1); }
@@ -257,21 +287,22 @@ input[type="radio"]:focus-visible {
   box-shadow: 0 0 0 3px rgba(122, 252, 255, 0.35);
 }
 
-/* ---------- Language picker ---------- */
+/* ---------- Language & theme pickers ---------- */
 .card-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
 }
-.lang-picker { display: inline-flex; align-items: center; gap: 4px; }
-.lang-icon { font-size: 1rem; line-height: 1; opacity: 0.85; }
-.lang-select {
+.head-pickers { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.lang-picker, .theme-picker { display: inline-flex; align-items: center; gap: 4px; }
+.lang-icon, .theme-icon { font-size: 1rem; line-height: 1; opacity: 0.85; }
+.lang-select, .theme-select {
   appearance: none;
   -webkit-appearance: none;
   background: var(--panel-2);
   color: var(--text);
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid var(--hairline-strong);
   border-radius: 9px;
   padding: 6px 28px 6px 10px;
   font-size: 0.82rem;
@@ -283,8 +314,10 @@ input[type="radio"]:focus-visible {
   background-size: 5px 5px, 5px 5px;
   background-repeat: no-repeat;
 }
-.lang-select:hover { border-color: var(--accent-2); }
-.lang-select:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 1px; }
+.lang-select:hover, .theme-select:hover { border-color: var(--accent-2); }
+.lang-select:focus-visible, .theme-select:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 1px; }
+/* The select drop-down list itself needs a readable background in both themes. */
+.lang-select option, .theme-select option { background: var(--panel); color: var(--text); }
 
 .sr-only {
   position: absolute;
@@ -298,7 +331,7 @@ input[type="radio"]:focus-visible {
   margin-top: 16px;
   padding: 12px;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  color: #14152b;
+  color: var(--on-accent);
   font-weight: 600;
 }
 
@@ -330,7 +363,7 @@ body.room {
   gap: 14px;
   padding: 12px 18px;
   background: var(--panel);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--hairline);
 }
 
 .back {
@@ -360,7 +393,7 @@ body.room {
 }
 .pill-button {
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  color: #14152b;
+  color: var(--on-accent);
   font-weight: 600;
   padding: 7px 14px;
   border-radius: 9px;
@@ -372,7 +405,7 @@ body.room {
   top: -6px;
   right: -6px;
   background: var(--accent);
-  color: #14152b;
+  color: var(--on-accent);
   font-size: 0.65rem;
   font-weight: 700;
   border-radius: 9px;
@@ -398,7 +431,7 @@ body.room {
   margin: 10px 18px 0;
   padding: 10px 12px;
   background: var(--panel-2);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--hairline-strong);
   border-radius: 10px;
   font-size: 0.85rem;
   color: var(--text);
@@ -418,7 +451,7 @@ body.room {
 .message {
   max-width: min(680px, 100%);
   background: var(--panel);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--hairline);
   border-radius: var(--radius);
   padding: 10px 14px;
 }
@@ -454,7 +487,7 @@ body.room {
   border-radius: 10px;
   margin-bottom: 6px;
   cursor: zoom-in;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--hairline);
 }
 video.media-preview { cursor: default; }
 .media-audio { width: min(360px, 100%); margin-bottom: 6px; }
@@ -474,7 +507,7 @@ video.media-preview { cursor: default; }
   gap: 10px;
   padding: 12px 16px;
   background: var(--panel);
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--hairline);
 }
 
 .file-button {
@@ -490,21 +523,10 @@ video.media-preview { cursor: default; }
 .composer-input input[type="text"] { flex: 1; }
 .composer input[type="text"]:disabled { opacity: 0.6; }
 
-.preview-toggle {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 0.78rem;
-  color: var(--muted);
-  user-select: none;
-  white-space: nowrap;
-}
-.preview-toggle input { width: auto; }
-
 .composer button[type="submit"] {
   padding: 12px 18px;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  color: #14152b;
+  color: var(--on-accent);
   font-weight: 600;
 }
 
@@ -518,7 +540,7 @@ video.media-preview { cursor: default; }
   margin: 0;
   padding: 4px;
   background: var(--panel-2);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--hairline-strong);
   border-radius: 10px;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
   max-height: 200px;
@@ -554,7 +576,7 @@ video.media-preview { cursor: default; }
   width: min(440px, 100%);
   height: 100%;
   background: var(--panel);
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 1px solid var(--hairline);
   display: flex;
   flex-direction: column;
 }
@@ -563,7 +585,7 @@ video.media-preview { cursor: default; }
   align-items: center;
   justify-content: space-between;
   padding: 16px 18px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--hairline);
 }
 .drawer-head h2 { margin: 0; font-size: 1.1rem; }
 .drawer-body { padding: 18px; overflow-y: auto; }
@@ -574,14 +596,14 @@ video.media-preview { cursor: default; }
   margin-top: 12px;
   padding: 10px;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  color: #14152b;
+  color: var(--on-accent);
   font-weight: 600;
 }
 
 .drawer-section {
   margin-top: 22px;
   padding-top: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--hairline);
 }
 .drawer-section h3 { margin: 0 0 8px; font-size: 0.95rem; }
 .announce-form { display: flex; flex-direction: column; gap: 6px; }
@@ -589,7 +611,7 @@ video.media-preview { cursor: default; }
   width: 100%;
   padding: 10px 12px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--hairline-strong);
   background: var(--panel-2);
   color: var(--text);
   font-family: inherit;
@@ -650,6 +672,32 @@ video.media-preview { cursor: default; }
   max-height: 90vh;
   border-radius: 10px;
 }
+/* Non-media previews (file info and small text files) shown in the lightbox. */
+.lightbox-info {
+  width: min(680px, 90vw);
+  max-height: 90vh;
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius);
+  padding: 20px 22px;
+  color: var(--text);
+}
+.lightbox-info h3 { margin: 0 0 4px; font-size: 1rem; word-break: break-all; }
+.lightbox-info .lb-meta { color: var(--muted); font-size: 0.82rem; margin: 0 0 12px; }
+.lightbox-info pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  background: var(--panel-2);
+  border-radius: 10px;
+  padding: 12px 14px;
+  max-height: 60vh;
+  overflow: auto;
+}
+.lightbox-info .lb-note { color: var(--muted); font-size: 0.82rem; margin: 12px 0 0; }
 .lightbox-close {
   position: absolute;
   top: 18px;
@@ -691,7 +739,7 @@ video.media-preview { cursor: default; }
   flex-wrap: wrap;
   padding: 10px 16px;
   background: var(--panel-2);
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--hairline);
 }
 .attach-list {
   list-style: none;
@@ -708,11 +756,30 @@ video.media-preview { cursor: default; }
   align-items: center;
   gap: 8px;
   background: var(--panel);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--hairline-strong);
   border-radius: 10px;
   padding: 6px 8px;
   max-width: 240px;
 }
+/* The thumbnail + name area is a button that opens a full preview of the staged
+   file before it is sent. */
+.attach-open {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+  font-family: inherit;
+  font-size: inherit;
+}
+.attach-open:hover .attach-meta { color: var(--accent-2); }
+.attach-open:hover .attach-thumb { filter: brightness(1.08); }
 .attach-thumb {
   width: 40px;
   height: 40px;
@@ -720,7 +787,7 @@ video.media-preview { cursor: default; }
   border-radius: 7px;
   flex: 0 0 auto;
 }
-.attach-icon { font-size: 1.5rem; line-height: 1; }
+.attach-icon { font-size: 1.5rem; line-height: 1; flex: 0 0 auto; }
 .attach-meta {
   font-size: 0.78rem;
   color: var(--muted);
@@ -729,7 +796,7 @@ video.media-preview { cursor: default; }
   white-space: nowrap;
 }
 .attach-remove {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--control-bg);
   color: var(--text);
   font-size: 0.75rem;
   padding: 2px 7px;
@@ -749,7 +816,7 @@ video.media-preview { cursor: default; }
   padding: 2px 6px;
   border-radius: 6px;
 }
-.member-badge.owner { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #14152b; }
+.member-badge.owner { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: var(--on-accent); }
 .member-badge.admin { background: rgba(122, 252, 255, 0.18); color: var(--accent-2); }
 .member-badge.warn { background: rgba(250, 204, 21, 0.18); color: #fbbf24; }
 .member-badge.danger { background: rgba(248, 113, 113, 0.18); color: var(--danger); }

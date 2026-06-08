@@ -21,7 +21,6 @@
     notice: document.getElementById("notice"),
     composer: document.getElementById("composer"),
     textInput: document.getElementById("text-input"),
-    previewToggle: document.getElementById("preview-toggle"),
     fileInput: document.getElementById("file-input"),
     uploadBar: document.getElementById("upload-bar"),
     uploadText: document.getElementById("upload-text"),
@@ -103,8 +102,12 @@
   }
 
   // ---------- lightbox ----------
-  function openLightbox(kind, url) {
+  function showLightbox(node) {
     els.lightboxContent.innerHTML = "";
+    els.lightboxContent.appendChild(node);
+    els.lightbox.hidden = false;
+  }
+  function openLightbox(kind, url) {
     let node;
     if (kind === "video") {
       node = document.createElement("video");
@@ -116,8 +119,7 @@
       node.src = url;
       node.alt = "preview";
     }
-    els.lightboxContent.appendChild(node);
-    els.lightbox.hidden = false;
+    showLightbox(node);
   }
   function closeLightbox() {
     els.lightbox.hidden = true;
@@ -231,6 +233,16 @@
     const body = document.createElement("div");
     body.className = "body";
 
+    // A message may carry text, a file, or both: a file sent with a describing
+    // caption is a single message that renders the caption alongside the file.
+    let mentionsMe = false;
+    if (msg.text) {
+      const textWrap = document.createElement("div");
+      textWrap.className = "text";
+      mentionsMe = renderText(textWrap, msg.text);
+      body.appendChild(textWrap);
+    }
+
     if (msg.kind === "file") {
       const kind = mediaKind(msg.fileType, msg.fileName);
       if (kind) appendMediaPreview(body, kind, fileURL(msg.fileId, true));
@@ -247,22 +259,21 @@
       row.appendChild(link);
       row.appendChild(size);
       body.appendChild(row);
-    } else {
-      const textWrap = document.createElement("div");
-      textWrap.className = "text";
-      const mentionsMe = renderText(textWrap, msg.text || "");
-      body.appendChild(textWrap);
-      if (mentionsMe) item.classList.add("mentions-me");
-      // Opt-in link previews generated on the sender's side.
-      if (msg.preview) {
-        URL_RE.lastIndex = 0;
-        let u;
-        while ((u = URL_RE.exec(msg.text || "")) !== null) {
-          const kind = urlMediaKind(u[1]);
-          if (kind) appendMediaPreview(body, kind, u[1]);
-        }
+    }
+
+    // Opt-in inline previews of links/media found in the text (sender's choice).
+    if (msg.preview && msg.text) {
+      URL_RE.lastIndex = 0;
+      let u;
+      while ((u = URL_RE.exec(msg.text)) !== null) {
+        const kind = urlMediaKind(u[1]);
+        if (kind) appendMediaPreview(body, kind, u[1]);
       }
-      if (mentionsMe && historyLoaded) notifyMention(item);
+    }
+
+    if (mentionsMe) {
+      item.classList.add("mentions-me");
+      if (historyLoaded) notifyMention(item);
     }
 
     item.appendChild(body);
@@ -466,19 +477,25 @@
     const res = await api("/api/messages/" + encodeURIComponent(roomKey), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sender: me.name, text: text, preview: els.previewToggle.checked }),
+      // Links & media are always rendered inline now that the preview toggle is gone.
+      body: JSON.stringify({ sender: me.name, text: text, preview: true }),
     });
     if (!res.ok) throw new Error((await res.text()).trim() || "send failed");
   }
 
   els.composer.addEventListener("submit", function (e) {
     e.preventDefault();
-    // Send any staged attachments along with the message.
-    if (pending.length > 0) sendAttachments();
     const text = els.textInput.value.trim();
+    els.mentionPop.hidden = true;
+    if (pending.length > 0) {
+      // Send the file(s) with the typed text as a caption, so a file and its
+      // description arrive as a single message.
+      els.textInput.value = "";
+      sendAttachments(text);
+      return;
+    }
     if (!text) return;
     els.textInput.value = "";
-    els.mentionPop.hidden = true;
     sendText(text).catch(function (err) {
       els.textInput.value = text;
       showNotice(err.message);
@@ -524,50 +541,135 @@
     pending.forEach((p, i) => {
       const li = document.createElement("li");
       li.className = "attach-item";
+
+      // Clicking the thumbnail or name previews the file's contents/info before
+      // it is sent, so a mis-attached file can be caught early.
+      const open = document.createElement("button");
+      open.type = "button";
+      open.className = "attach-open";
+      open.title = t("room.preview");
       if (p.url) {
         const img = document.createElement("img");
         img.className = "attach-thumb";
         img.src = p.url;
         img.alt = p.file.name;
-        li.appendChild(img);
+        open.appendChild(img);
       } else {
         const icon = document.createElement("span");
         icon.className = "attach-icon";
-        icon.textContent = "📄";
-        li.appendChild(icon);
+        icon.textContent = fileEmoji(p.file);
+        open.appendChild(icon);
       }
       const meta = document.createElement("span");
       meta.className = "attach-meta";
       meta.textContent = p.file.name + " (" + formatSize(p.file.size) + ")";
-      li.appendChild(meta);
+      open.appendChild(meta);
+      open.addEventListener("click", () => previewStaged(i));
+      li.appendChild(open);
+
       const rm = document.createElement("button");
       rm.type = "button";
       rm.className = "attach-remove";
       rm.textContent = "✕";
+      rm.title = t("room.attach_remove");
       rm.addEventListener("click", () => removeAttachment(i));
       li.appendChild(rm);
       els.attachList.appendChild(li);
     });
   }
 
-  async function uploadOne(file) {
+  // Pick a representative emoji for a non-image staged file.
+  function fileEmoji(file) {
+    const kind = mediaKind(file.type, file.name);
+    if (kind === "video") return "🎬";
+    if (kind === "audio") return "🎵";
+    if (isTextFile(file)) return "📝";
+    return "📄";
+  }
+
+  function isTextFile(file) {
+    if ((file.type || "").indexOf("text/") === 0) return true;
+    const ext = (file.name || "").toLowerCase().split(".").pop();
+    return ["txt", "md", "markdown", "json", "csv", "log", "js", "ts", "css",
+      "html", "xml", "yml", "yaml", "ini", "conf", "sh", "py", "go"].includes(ext);
+  }
+
+  // Preview a staged file (before sending): media opens in the lightbox; small
+  // text files show their contents; anything else shows its name, type and size.
+  function previewStaged(i) {
+    const p = pending[i];
+    if (!p) return;
+    const kind = mediaKind(p.file.type, p.file.name);
+    if (kind === "image" || kind === "video") {
+      const url = p.url || URL.createObjectURL(p.file);
+      if (!p.url) p.url = url; // cache so it is revoked on clear/remove
+      openLightbox(kind, url);
+      return;
+    }
+    if (isTextFile(p.file) && p.file.size <= 256 * 1024) {
+      const reader = new FileReader();
+      reader.onload = () => showFileInfo(p.file, String(reader.result || ""));
+      reader.onerror = () => showFileInfo(p.file, null);
+      reader.readAsText(p.file.slice(0, 256 * 1024));
+      return;
+    }
+    showFileInfo(p.file, null);
+  }
+
+  function showFileInfo(file, text) {
+    const box = document.createElement("div");
+    box.className = "lightbox-info";
+    const h = document.createElement("h3");
+    h.textContent = file.name;
+    box.appendChild(h);
+    const meta = document.createElement("p");
+    meta.className = "lb-meta";
+    meta.textContent = (file.type || "unknown type") + " · " + formatSize(file.size);
+    box.appendChild(meta);
+    if (text != null) {
+      const pre = document.createElement("pre");
+      pre.textContent = text;
+      box.appendChild(pre);
+      if (file.size > 256 * 1024) {
+        const note = document.createElement("p");
+        note.className = "lb-note";
+        note.textContent = "…";
+        box.appendChild(note);
+      }
+    } else {
+      const note = document.createElement("p");
+      note.className = "lb-note";
+      note.textContent = t("room.no_inline_preview");
+      box.appendChild(note);
+    }
+    showLightbox(box);
+  }
+
+  async function uploadOne(file, caption) {
     els.uploadBar.hidden = false;
     els.uploadText.textContent = t("room.uploading") + " " + file.name + "…";
     const data = new FormData();
     data.append("sender", me.name);
     data.append("file", file);
+    if (caption) {
+      data.append("text", caption);
+      data.append("preview", "1");
+    }
     const res = await api("/api/files/" + encodeURIComponent(roomKey), { method: "POST", body: data });
     if (!res.ok) throw new Error((await res.text()).trim() || t("room.upload_failed"));
     els.uploadText.textContent = t("room.shared") + " " + file.name;
   }
 
-  async function sendAttachments() {
+  // Send the staged files. An optional caption is attached to the first file so
+  // a file and its description form a single message; remaining files are sent
+  // on their own.
+  async function sendAttachments(caption) {
     if (pending.length === 0) return;
     const items = pending.slice();
     clearAttachments();
     try {
-      for (const p of items) {
-        await uploadOne(p.file);
+      for (let i = 0; i < items.length; i++) {
+        await uploadOne(items[i].file, i === 0 ? caption : "");
       }
     } catch (err) {
       els.uploadText.textContent = t("room.upload_failed") + ": " + err.message;
@@ -580,7 +682,13 @@
     stageFiles(els.fileInput.files);
     els.fileInput.value = "";
   });
-  els.attachSend.addEventListener("click", sendAttachments);
+  // The standalone "send attachments" button sends files on their own; a caption
+  // is only attached when sending through the composer with text typed in.
+  els.attachSend.addEventListener("click", function () {
+    const caption = els.textInput.value.trim();
+    els.textInput.value = "";
+    sendAttachments(caption);
+  });
   els.attachClear.addEventListener("click", clearAttachments);
 
   // Paste images/files straight from the clipboard.
