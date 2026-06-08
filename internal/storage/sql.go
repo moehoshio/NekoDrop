@@ -118,6 +118,7 @@ func (s *sqlStore) migrate(d dialect) error {
 			banned ` + d.textType + ` NOT NULL,
 			muted ` + d.textType + ` NOT NULL,
 			names ` + d.textType + ` NOT NULL,
+			nicks ` + d.textType + ` NOT NULL,
 			pending ` + d.textType + ` NOT NULL,
 			PRIMARY KEY (id)
 		)`,
@@ -129,6 +130,7 @@ func (s *sqlStore) migrate(d dialect) error {
 			sender_uid VARCHAR(64) NOT NULL,
 			body ` + d.textType + ` NOT NULL,
 			mentions ` + d.textType + ` NOT NULL,
+			reply_to VARCHAR(64) NOT NULL,
 			preview BOOLEAN NOT NULL,
 			file_id VARCHAR(64) NOT NULL,
 			file_name ` + d.textType + ` NOT NULL,
@@ -161,6 +163,16 @@ func (s *sqlStore) migrate(d dialect) error {
 		if _, err := s.db.Exec(q); err != nil {
 			return fmt.Errorf("storage: migrate: %w", err)
 		}
+	}
+	// Best-effort, additive column migrations for databases created by an earlier
+	// version. Adding a column that already exists is an error on both SQLite and
+	// MySQL, so these are intentionally ignored: the CREATE TABLE statements above
+	// already cover fresh databases.
+	for _, q := range []string{
+		`ALTER TABLE channels ADD COLUMN nicks ` + d.textType + ` NOT NULL DEFAULT '{}'`,
+		`ALTER TABLE messages ADD COLUMN reply_to VARCHAR(64) NOT NULL DEFAULT ''`,
+	} {
+		_, _ = s.db.Exec(q)
 	}
 	return nil
 }
@@ -202,7 +214,7 @@ func (s *sqlStore) SaveUser(u User) error {
 func (s *sqlStore) LoadChannels() ([]Channel, error) {
 	rows, err := s.db.Query(`SELECT id, ckey, owner_uid, name, description, visibility,
 		list_public, allow_join, require_approval, allow_speak,
-		admins, members, banned, muted, names, pending FROM channels`)
+		admins, members, banned, muted, names, nicks, pending FROM channels`)
 	if err != nil {
 		return nil, err
 	}
@@ -210,10 +222,10 @@ func (s *sqlStore) LoadChannels() ([]Channel, error) {
 	var out []Channel
 	for rows.Next() {
 		var c Channel
-		var admins, members, banned, muted, names, pending string
+		var admins, members, banned, muted, names, nicks, pending string
 		if err := rows.Scan(&c.ID, &c.Key, &c.OwnerUID, &c.Name, &c.Description, &c.Visibility,
 			&c.ListPublic, &c.AllowJoin, &c.RequireApproval, &c.AllowSpeak,
-			&admins, &members, &banned, &muted, &names, &pending); err != nil {
+			&admins, &members, &banned, &muted, &names, &nicks, &pending); err != nil {
 			return nil, err
 		}
 		c.Admins = decodeSlice(admins)
@@ -221,6 +233,7 @@ func (s *sqlStore) LoadChannels() ([]Channel, error) {
 		c.Banned = decodeSlice(banned)
 		c.Muted = decodeSlice(muted)
 		c.Names = decodeMap(names)
+		c.Nicks = decodeMap(nicks)
 		c.Pending = decodeMap(pending)
 		out = append(out, c)
 	}
@@ -233,12 +246,12 @@ func (s *sqlStore) SaveChannel(c Channel) error {
 	_, err := s.db.Exec(`REPLACE INTO channels
 		(id, ckey, owner_uid, name, description, visibility,
 		 list_public, allow_join, require_approval, allow_speak,
-		 admins, members, banned, muted, names, pending)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 admins, members, banned, muted, names, nicks, pending)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		c.ID, c.Key, c.OwnerUID, c.Name, c.Description, c.Visibility,
 		c.ListPublic, c.AllowJoin, c.RequireApproval, c.AllowSpeak,
 		encodeSlice(c.Admins), encodeSlice(c.Members), encodeSlice(c.Banned),
-		encodeSlice(c.Muted), encodeMap(c.Names), encodeMap(c.Pending))
+		encodeSlice(c.Muted), encodeMap(c.Names), encodeMap(c.Nicks), encodeMap(c.Pending))
 	return err
 }
 
@@ -253,7 +266,7 @@ func (s *sqlStore) DeleteChannel(id string) error {
 
 func (s *sqlStore) LoadMessages(channelID string) ([]Message, error) {
 	rows, err := s.db.Query(`SELECT id, channel_id, kind, sender, sender_uid, body, mentions,
-		preview, file_id, file_name, file_size, file_type, created
+		reply_to, preview, file_id, file_name, file_size, file_type, created
 		FROM messages WHERE channel_id = ? ORDER BY created ASC, id ASC`, channelID)
 	if err != nil {
 		return nil, err
@@ -265,7 +278,7 @@ func (s *sqlStore) LoadMessages(channelID string) ([]Message, error) {
 		var mentions string
 		var created time.Time
 		if err := rows.Scan(&m.ID, &m.ChannelID, &m.Kind, &m.Sender, &m.SenderUID, &m.Text, &mentions,
-			&m.Preview, &m.FileID, &m.FileName, &m.FileSize, &m.FileType, &created); err != nil {
+			&m.ReplyTo, &m.Preview, &m.FileID, &m.FileName, &m.FileSize, &m.FileType, &created); err != nil {
 			return nil, err
 		}
 		m.Mentions = decodeSlice(mentions)
@@ -280,10 +293,10 @@ func (s *sqlStore) AppendMessage(m Message) error {
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(`REPLACE INTO messages
 		(id, channel_id, kind, sender, sender_uid, body, mentions,
-		 preview, file_id, file_name, file_size, file_type, created)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 reply_to, preview, file_id, file_name, file_size, file_type, created)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.ID, m.ChannelID, m.Kind, m.Sender, m.SenderUID, m.Text, encodeSlice(m.Mentions),
-		m.Preview, m.FileID, m.FileName, m.FileSize, m.FileType, m.Time.UTC())
+		m.ReplyTo, m.Preview, m.FileID, m.FileName, m.FileSize, m.FileType, m.Time.UTC())
 	return err
 }
 

@@ -53,6 +53,7 @@ type Message struct {
 	SenderUID string      `json:"senderUid"`
 	Text      string      `json:"text,omitempty"`
 	Mentions  []string    `json:"mentions,omitempty"`
+	ReplyTo   string      `json:"replyTo,omitempty"`
 	Preview   bool        `json:"preview,omitempty"`
 	FileID    string      `json:"fileId,omitempty"`
 	FileName  string      `json:"fileName,omitempty"`
@@ -95,7 +96,18 @@ const (
 	EventChannel EventKind = "channel"
 	// EventDissolved signals that the channel has been dissolved.
 	EventDissolved EventKind = "dissolved"
+	// EventIdentity reports that a participant's display name (their global name
+	// or per-channel nickname) changed, so clients can relabel that user's
+	// existing messages and mentions live.
+	EventIdentity EventKind = "identity"
 )
+
+// Identity is the payload of an EventIdentity: a participant's UID and their
+// current resolved display name within the channel.
+type Identity struct {
+	UID  string `json:"uid"`
+	Name string `json:"name"`
+}
 
 // Event is a single real-time update delivered over the subscription channel.
 // Exactly one of the payload fields is populated, selected by Type.
@@ -105,6 +117,7 @@ type Event struct {
 	Online       int           `json:"online,omitempty"`
 	Announcement *Announcement `json:"announcement,omitempty"`
 	Channel      *Info         `json:"channel,omitempty"`
+	Identity     *Identity     `json:"identity,omitempty"`
 }
 
 // Settings is the mutable, owner-controlled configuration of a channel.
@@ -211,7 +224,8 @@ type Room struct {
 	banned  map[string]bool
 	muted   map[string]bool
 	pending map[string]string // uid -> display name, awaiting approval
-	names   map[string]string // uid -> last seen display name (roster)
+	names   map[string]string // uid -> last seen global display name (roster)
+	nicks   map[string]string // uid -> per-channel display nickname
 
 	messages      []Message
 	files         map[string]*File
@@ -243,6 +257,7 @@ func newRoom(key, id string) *Room {
 		muted:          make(map[string]bool),
 		pending:        make(map[string]string),
 		names:          make(map[string]string),
+		nicks:          make(map[string]string),
 		files:          make(map[string]*File),
 		online:         make(map[string]int),
 		subscribers:    make(map[chan Event]struct{}),
@@ -333,6 +348,69 @@ func (r *Room) rememberSenderName(uid, name string) {
 	}
 }
 
+// displayLocked resolves the name shown for uid in this channel: the per-channel
+// nickname when one is set, otherwise the supplied fallback (typically the
+// sender's global name as recorded on the message). The caller holds at least a
+// read lock.
+func (r *Room) displayLocked(uid, fallback string) string {
+	if n := r.nicks[uid]; n != "" {
+		return n
+	}
+	return fallback
+}
+
+// DisplayName is the exported, lock-taking form of displayLocked. It is used to
+// re-resolve a stored message's sender name against the channel's current
+// nicknames so that history replay reflects later nickname changes.
+func (r *Room) DisplayName(uid, fallback string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.displayLocked(uid, fallback)
+}
+
+// ApplyNick records uid's per-channel nickname (an empty nick clears it) and
+// returns the resolved display name to attach to their message — the nickname
+// when set, otherwise their global name. When the stored nickname actually
+// changes it is persisted and an identity event is broadcast so every connected
+// client relabels that user's existing messages and mentions.
+//
+// Nicknames are only retained for users with a standing in the channel, mirroring
+// rememberSenderName: this bounds the map against a flood of cookieless speakers
+// in open ad-hoc rooms, while the resolved name still travels with each message.
+func (r *Room) ApplyNick(uid, globalName, nick string) string {
+	nick = strings.TrimSpace(nick)
+	resolved := globalName
+	if nick != "" {
+		resolved = nick
+	}
+	if uid == "" {
+		return resolved
+	}
+
+	r.mu.Lock()
+	changed := false
+	if nick == "" {
+		if _, ok := r.nicks[uid]; ok {
+			delete(r.nicks, uid)
+			changed = true
+		}
+	} else if r.nicks[uid] != nick && r.hasStandingLocked(uid) {
+		r.nicks[uid] = nick
+		changed = true
+	}
+	var rec storage.Channel
+	if changed {
+		rec = r.record()
+	}
+	r.mu.Unlock()
+
+	if changed {
+		r.persist(rec)
+		r.broadcast(Event{Type: EventIdentity, Identity: &Identity{UID: uid, Name: resolved}})
+	}
+	return resolved
+}
+
 // record builds the persistable snapshot of this channel. The caller must hold
 // at least a read lock.
 func (r *Room) record() storage.Channel {
@@ -348,6 +426,7 @@ func (r *Room) record() storage.Channel {
 		RequireApproval: r.settings.RequireApproval,
 		AllowSpeak:      r.settings.AllowSpeak,
 		Names:           cloneMap(r.names),
+		Nicks:           cloneMap(r.nicks),
 		Pending:         cloneMap(r.pending),
 	}
 	c.Admins = keysOf(r.admins)
@@ -571,8 +650,9 @@ func (r *Room) SubscriberLimitReached() bool {
 
 // --- Messages & files ---
 
-// AddText records a text message and broadcasts it.
-func (r *Room) AddText(sender, senderUID, text string, mentions []string, preview bool) Message {
+// AddText records a text message and broadcasts it. replyTo, when non-empty, is
+// the ID of an earlier message this one replies to.
+func (r *Room) AddText(sender, senderUID, text string, mentions []string, preview bool, replyTo string) Message {
 	m := Message{
 		ID:        newID(12),
 		Kind:      KindText,
@@ -580,6 +660,7 @@ func (r *Room) AddText(sender, senderUID, text string, mentions []string, previe
 		SenderUID: senderUID,
 		Text:      text,
 		Mentions:  mentions,
+		ReplyTo:   replyTo,
 		Preview:   preview,
 		Time:      time.Now().UTC(),
 	}
@@ -599,7 +680,7 @@ func (r *Room) AddText(sender, senderUID, text string, mentions []string, previe
 // AddFile stores a file payload, records a file message referencing it, and
 // broadcasts the message. An optional caption (text) may accompany the file so a
 // file and its description are delivered as a single message.
-func (r *Room) AddFile(sender, senderUID, name, contentType string, data []byte, text string, mentions []string, preview bool) Message {
+func (r *Room) AddFile(sender, senderUID, name, contentType string, data []byte, text string, mentions []string, preview bool, replyTo string) Message {
 	f := &File{ID: newID(12), Name: name, ContentType: contentType, Data: data}
 	m := Message{
 		ID:        newID(12),
@@ -608,6 +689,7 @@ func (r *Room) AddFile(sender, senderUID, name, contentType string, data []byte,
 		SenderUID: senderUID,
 		Text:      text,
 		Mentions:  mentions,
+		ReplyTo:   replyTo,
 		Preview:   preview,
 		FileID:    f.ID,
 		FileName:  name,
@@ -641,6 +723,7 @@ func (r *Room) messageRecord(m Message) storage.Message {
 		SenderUID: m.SenderUID,
 		Text:      m.Text,
 		Mentions:  m.Mentions,
+		ReplyTo:   m.ReplyTo,
 		Preview:   m.Preview,
 		FileID:    m.FileID,
 		FileName:  m.FileName,
@@ -1058,6 +1141,9 @@ func (h *Hub) restore() {
 		for uid, name := range c.Names {
 			r.names[uid] = name
 		}
+		for uid, nick := range c.Nicks {
+			r.nicks[uid] = nick
+		}
 		for uid, name := range c.Pending {
 			r.pending[uid] = name
 		}
@@ -1071,7 +1157,7 @@ func (h *Hub) restore() {
 			for _, m := range msgs {
 				r.messages = append(r.messages, Message{
 					ID: m.ID, Kind: MessageKind(m.Kind), Sender: m.Sender, SenderUID: m.SenderUID,
-					Text: m.Text, Mentions: m.Mentions, Preview: m.Preview,
+					Text: m.Text, Mentions: m.Mentions, ReplyTo: m.ReplyTo, Preview: m.Preview,
 					FileID: m.FileID, FileName: m.FileName, FileSize: m.FileSize, FileType: m.FileType,
 					Time: m.Time,
 				})
@@ -1298,6 +1384,40 @@ func (h *Hub) OwnedBy(ownerUID string) []Info {
 	for _, r := range rooms {
 		info := r.Info()
 		if info.OwnerUID == ownerUID && !info.Dissolved {
+			out = append(out, info)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Online != out[j].Online {
+			return out[i].Online > out[j].Online
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+// JoinedBy returns the channels uid has joined as a member but does not own
+// (owned channels are surfaced separately as "your channels"). This powers the
+// landing page's "joined channels" list, so a visitor can return to channels
+// they belong to — including private ones — without remembering the code.
+func (h *Hub) JoinedBy(uid string) []Info {
+	if uid == "" {
+		return nil
+	}
+	h.mu.Lock()
+	rooms := make([]*Room, 0, len(h.byKey))
+	for _, r := range h.byKey {
+		rooms = append(rooms, r)
+	}
+	h.mu.Unlock()
+
+	out := make([]Info, 0)
+	for _, r := range rooms {
+		r.mu.RLock()
+		joined := !r.dissolved && r.members[uid] && !r.isOwner(uid)
+		info := r.infoLocked()
+		r.mu.RUnlock()
+		if joined {
 			out = append(out, info)
 		}
 	}

@@ -12,7 +12,7 @@ func TestMessageHistoryIsBounded(t *testing.T) {
 	r.applyLimits(Limits{MaxMessagesPerChannel: 5, MaxFileBytesPerChannel: 1 << 20, MaxSubscribersPerChannel: 10, MaxChannels: 10})
 
 	for i := 0; i < 50; i++ {
-		r.AddText("alice", "100", "m"+strconv.Itoa(i), nil, false)
+		r.AddText("alice", "100", "m"+strconv.Itoa(i), nil, false, "")
 	}
 	r.mu.RLock()
 	n := len(r.messages)
@@ -37,7 +37,7 @@ func TestFileBytesAreBounded(t *testing.T) {
 	payload := make([]byte, 1024)
 	var ids []string
 	for i := 0; i < 10; i++ {
-		m := r.AddFile("bob", "101", "f"+strconv.Itoa(i)+".bin", "application/octet-stream", payload, "", nil, false)
+		m := r.AddFile("bob", "101", "f"+strconv.Itoa(i)+".bin", "application/octet-stream", payload, "", nil, false, "")
 		ids = append(ids, m.FileID)
 	}
 
@@ -67,7 +67,7 @@ func TestRosterMapNotGrownByAnonymousSenders(t *testing.T) {
 	r := newRoom("open", "id1") // ownerless: speakers are not members
 	for i := 0; i < 1000; i++ {
 		uid := strconv.Itoa(1000 + i)
-		r.AddText("flood", uid, "spam", nil, false)
+		r.AddText("flood", uid, "spam", nil, false, "")
 	}
 	r.mu.RLock()
 	n := len(r.names)
@@ -78,7 +78,7 @@ func TestRosterMapNotGrownByAnonymousSenders(t *testing.T) {
 
 	// A genuine member's name is still tracked.
 	r.members["100"] = true
-	r.AddText("alice", "100", "hi", nil, false)
+	r.AddText("alice", "100", "hi", nil, false, "")
 	r.mu.RLock()
 	_, ok := r.names["100"]
 	r.mu.RUnlock()

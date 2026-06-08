@@ -5,6 +5,58 @@ import (
 	"time"
 )
 
+// drainEvent waits for the next event of the given kind on ch.
+func drainEvent(t *testing.T, ch <-chan Event, kind EventKind) Event {
+	t.Helper()
+	timeout := time.After(time.Second)
+	for {
+		select {
+		case e := <-ch:
+			if e.Type == kind {
+				return e
+			}
+		case <-timeout:
+			t.Fatalf("did not receive %s event", kind)
+		}
+	}
+}
+
+// TestApplyNickResolvesAndBroadcasts verifies that a per-channel nickname
+// overrides the global name for a member, that it is retroactively reflected by
+// DisplayName, and that changing it broadcasts an identity event. Messages stay
+// keyed by UID throughout.
+func TestApplyNickResolvesAndBroadcasts(t *testing.T) {
+	r := newRoom("test", "id1")
+	r.members["100"] = true // give the user a standing so the nick is retained
+
+	_, _, ch, cancel := r.Subscribe("100")
+	defer cancel()
+
+	// No nick yet: the global name is used.
+	if got := r.ApplyNick("100", "Alice", ""); got != "Alice" {
+		t.Fatalf("ApplyNick empty = %q, want Alice", got)
+	}
+
+	// Setting a nick resolves to it and broadcasts an identity event.
+	if got := r.ApplyNick("100", "Alice", "Ally"); got != "Ally" {
+		t.Fatalf("ApplyNick = %q, want Ally", got)
+	}
+	ev := drainEvent(t, ch, EventIdentity)
+	if ev.Identity == nil || ev.Identity.UID != "100" || ev.Identity.Name != "Ally" {
+		t.Fatalf("identity event = %+v, want {100 Ally}", ev.Identity)
+	}
+
+	// DisplayName re-resolves a message's stored name against the current nick,
+	// so history replay reflects the change.
+	if got := r.DisplayName("100", "Alice"); got != "Ally" {
+		t.Fatalf("DisplayName = %q, want Ally", got)
+	}
+	// A UID with no nick falls back to the supplied name.
+	if got := r.DisplayName("999", "Zed"); got != "Zed" {
+		t.Fatalf("DisplayName fallback = %q, want Zed", got)
+	}
+}
+
 // drainMessage waits for the next message event on ch, ignoring presence and
 // other non-message events that may be interleaved.
 func drainMessage(t *testing.T, ch <-chan Event) Message {
@@ -31,7 +83,7 @@ func TestAddTextBroadcastsAndStoresHistory(t *testing.T) {
 		t.Fatalf("expected empty history, got %d", len(history))
 	}
 
-	sent := r.AddText("alice", "100", "hello", nil, false)
+	sent := r.AddText("alice", "100", "hello", nil, false, "")
 	if sent.Kind != KindText || sent.Text != "hello" || sent.Sender != "alice" || sent.SenderUID != "100" {
 		t.Fatalf("unexpected message: %+v", sent)
 	}
@@ -53,7 +105,7 @@ func TestAddFileStoresPayload(t *testing.T) {
 	r := newRoom("test", "id1")
 	data := []byte("file-bytes")
 
-	m := r.AddFile("bob", "101", "notes.txt", "text/plain", data, "", nil, false)
+	m := r.AddFile("bob", "101", "notes.txt", "text/plain", data, "", nil, false, "")
 	if m.Kind != KindFile || m.FileName != "notes.txt" || m.FileSize != int64(len(data)) {
 		t.Fatalf("unexpected file message: %+v", m)
 	}
@@ -99,7 +151,7 @@ func TestPublishDoesNotBlockOnFullSubscriber(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < 200; i++ {
-			r.AddText("x", "100", "msg", nil, false)
+			r.AddText("x", "100", "msg", nil, false, "")
 		}
 		close(done)
 	}()

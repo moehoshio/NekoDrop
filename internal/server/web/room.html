@@ -66,11 +66,22 @@
     </div>
   </div>
 
+  <!-- Reply context: the earlier message the next message will reply to -->
+  <div id="reply-bar" class="reply-bar" hidden>
+    <button id="reply-jump" class="reply-jump" type="button">
+      <span class="reply-label" data-i18n="room.replying_to">Replying to</span>
+      <span id="reply-who" class="reply-who"></span>
+      <span id="reply-snippet" class="reply-snippet"></span>
+    </button>
+    <button id="reply-cancel" class="reply-cancel icon-button" type="button" data-i18n-title="room.reply_cancel" title="Cancel reply">✕</button>
+  </div>
+
   <form id="composer" class="composer" autocomplete="off">
     <label class="file-button" data-i18n-title="room.share_file" title="Share a file">
       📎
       <input id="file-input" type="file" multiple hidden>
     </label>
+    <input id="nick-input" class="nick-input" type="text" data-i18n-placeholder="room.nick_ph" placeholder="Nick (this channel)" data-i18n-title="room.nick_title" title="Display name for this channel only; leave empty to use your global name" autocomplete="off" maxlength="32">
     <div class="composer-input">
       <input id="text-input" type="text" data-i18n-placeholder="room.msg_ph" placeholder="Type a message… use @ to mention" autocomplete="off">
       <ul id="mention-pop" class="mention-pop" hidden></ul>

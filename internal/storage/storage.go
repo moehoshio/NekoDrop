@@ -48,6 +48,7 @@ type Channel struct {
 	Banned          []string
 	Muted           []string
 	Names           map[string]string // uid -> last seen display name
+	Nicks           map[string]string // uid -> per-channel display nickname
 	Pending         map[string]string // uid -> requested display name
 }
 
@@ -60,6 +61,7 @@ type Message struct {
 	SenderUID string
 	Text      string
 	Mentions  []string
+	ReplyTo   string
 	Preview   bool
 	FileID    string
 	FileName  string

@@ -45,6 +45,7 @@ func TestSQLiteChannelAndHistoryRoundTrip(t *testing.T) {
 		ListPublic: true, AllowJoin: true, AllowSpeak: true,
 		Admins: []string{"100"}, Members: []string{"100", "200"},
 		Muted: []string{"200"}, Names: map[string]string{"100": "Alice", "200": "Bob"},
+		Nicks:   map[string]string{"200": "Bobby"},
 		Pending: map[string]string{"300": "Carol"},
 	}
 	if err := st.SaveChannel(ch); err != nil {
@@ -55,6 +56,12 @@ func TestSQLiteChannelAndHistoryRoundTrip(t *testing.T) {
 		Text: "hello", Mentions: []string{"200"}, Time: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("append message: %v", err)
+	}
+	if err := st.AppendMessage(Message{
+		ID: "m2", ChannelID: "abc123", Kind: "text", Sender: "Bob", SenderUID: "200",
+		Text: "re: hello", ReplyTo: "m1", Time: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("append reply: %v", err)
 	}
 	if err := st.SaveFile(File{ID: "f1", ChannelID: "abc123", Name: "n.txt", ContentType: "text/plain", Data: []byte("data")}); err != nil {
 		t.Fatalf("save file: %v", err)
@@ -71,10 +78,16 @@ func TestSQLiteChannelAndHistoryRoundTrip(t *testing.T) {
 	if got.Name != "Team Cats" || len(got.Members) != 2 || got.Names["200"] != "Bob" || got.Pending["300"] != "Carol" {
 		t.Fatalf("unexpected channel: %+v", got)
 	}
+	if got.Nicks["200"] != "Bobby" {
+		t.Fatalf("nick not persisted: %+v", got.Nicks)
+	}
 
 	msgs, err := st.LoadMessages("abc123")
-	if err != nil || len(msgs) != 1 || msgs[0].Text != "hello" || len(msgs[0].Mentions) != 1 {
+	if err != nil || len(msgs) != 2 || msgs[0].Text != "hello" || len(msgs[0].Mentions) != 1 {
 		t.Fatalf("unexpected messages: %+v err=%v", msgs, err)
+	}
+	if msgs[1].ReplyTo != "m1" {
+		t.Fatalf("reply_to not persisted: %+v", msgs[1])
 	}
 
 	f, ok, err := st.LoadFile("f1")

@@ -523,6 +523,82 @@ video.media-preview { cursor: default; }
 .composer-input input[type="text"] { flex: 1; }
 .composer input[type="text"]:disabled { opacity: 0.6; }
 
+/* Per-channel nickname input, left of the message box. */
+.nick-input {
+  width: 130px;
+  flex: 0 0 auto;
+  min-width: 0;
+  color: var(--accent);
+  font-weight: 600;
+}
+@media (max-width: 560px) { .nick-input { width: 92px; } }
+
+/* Reply context bar above the composer. */
+.reply-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--panel-2);
+  border-top: 1px solid var(--hairline);
+}
+.reply-jump {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  text-align: left;
+  background: none;
+  padding: 4px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  overflow: hidden;
+}
+.reply-jump:hover { background: var(--panel); }
+.reply-label { color: var(--muted); font-size: 0.78rem; flex: 0 0 auto; }
+.reply-who { color: var(--accent); font-weight: 600; font-size: 0.8rem; flex: 0 0 auto; }
+.reply-snippet {
+  color: var(--muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.reply-cancel { flex: 0 0 auto; }
+
+/* Inline quoted reply rendered at the top of a replying message. */
+.reply-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  text-align: left;
+  background: var(--panel-2);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  padding: 4px 8px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  max-width: 100%;
+}
+.reply-quote:hover { background: var(--panel); }
+.reply-quote .reply-who { font-size: 0.76rem; }
+.reply-quote .reply-snippet { font-size: 0.78rem; max-width: 100%; }
+
+/* The small ↩ reply affordance in a message's meta row. */
+.reply-action {
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.82rem;
+  padding: 0 4px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.message:hover .reply-action { opacity: 1; }
+.reply-action:hover { color: var(--accent); }
+
 .composer button[type="submit"] {
   padding: 12px 18px;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));

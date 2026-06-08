@@ -214,6 +214,7 @@ func (s *Server) handleChannelList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"channels": s.hub.PublicList(),
 		"mine":     s.hub.OwnedBy(u.UID),
+		"joined":   s.hub.JoinedBy(u.UID),
 	})
 }
 
@@ -533,6 +534,10 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, m := range history {
 		m := m
+		// Re-resolve the sender's display name against the channel's current
+		// nicknames so replayed history reflects later nickname changes rather
+		// than the name captured when the message was first sent.
+		m.Sender = rm.DisplayName(m.SenderUID, m.Sender)
 		if err := writeSSE(w, room.Event{Type: room.EventMessage, Message: &m}); err != nil {
 			return
 		}
@@ -578,7 +583,9 @@ func writeSSE(w io.Writer, e room.Event) error {
 
 type postMessageRequest struct {
 	Sender  string `json:"sender"`
+	Nick    string `json:"nick"`
 	Text    string `json:"text"`
+	ReplyTo string `json:"replyTo"`
 	Preview bool   `json:"preview"`
 }
 
@@ -606,7 +613,11 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, speakDeniedReason(rm, u.UID), http.StatusForbidden)
 		return
 	}
-	m := rm.AddText(u.Name, u.UID, text, parseMentions(text), req.Preview)
+	// Resolve the display name from the channel nickname (when set), falling back
+	// to the global name. Messages are keyed by UID, so a later nickname change
+	// retroactively relabels this user's history.
+	display := rm.ApplyNick(u.UID, u.Name, req.Nick)
+	m := rm.AddText(display, u.UID, text, parseMentions(text), req.Preview, req.ReplyTo)
 	writeJSON(w, http.StatusCreated, m)
 }
 
@@ -658,7 +669,8 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	caption := strings.TrimSpace(r.FormValue("text"))
 	preview := r.FormValue("preview") == "1" || r.FormValue("preview") == "true"
 
-	m := rm.AddFile(u.Name, u.UID, name, ctype, data, caption, parseMentions(caption), preview)
+	display := rm.ApplyNick(u.UID, u.Name, r.FormValue("nick"))
+	m := rm.AddFile(display, u.UID, name, ctype, data, caption, parseMentions(caption), preview, r.FormValue("replyTo"))
 	writeJSON(w, http.StatusCreated, m)
 }
 
