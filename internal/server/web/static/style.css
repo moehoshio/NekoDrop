@@ -523,15 +523,16 @@ video.media-preview { cursor: default; }
 .composer-input input[type="text"] { flex: 1; }
 .composer input[type="text"]:disabled { opacity: 0.6; }
 
-/* Per-channel nickname input, left of the message box. */
+/* Per-channel nickname input, left of the message box. It is capped to a small
+   share of the composer (and may shrink) so it never crowds the message box. */
 .nick-input {
-  width: 130px;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  width: clamp(72px, 16%, 120px);
   min-width: 0;
   color: var(--accent);
   font-weight: 600;
+  text-overflow: ellipsis;
 }
-@media (max-width: 560px) { .nick-input { width: 92px; } }
 
 /* Reply context bar above the composer. */
 .reply-bar {
@@ -630,6 +631,27 @@ video.media-preview { cursor: default; }
   font-size: 0.88rem;
 }
 .mention-pop li:hover { background: var(--panel); color: var(--accent-2); }
+
+/* Notification settings popover (per-channel, per-visitor). */
+.notif-cfg { position: relative; display: inline-flex; }
+.notif-cfg-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 25;
+  width: 230px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--panel-2);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+}
+.notif-cfg-panel .check { font-size: 0.85rem; }
+.notif-cfg-hint { margin: 0; font-size: 0.74rem; color: var(--muted); }
+#notif-cfg-btn.is-on { color: var(--accent); }
 
 .upload-bar {
   padding: 8px 16px;

@@ -39,6 +39,7 @@ Then open <http://localhost:8080> in your browser, enter a room code (or generat
 - **@-mentions** — type `@` to pick a participant, or click anyone's name in chat to mention them. Mentions target a UID rather than a name, so they keep pointing at the same person after a rename. You get a 🔔 notification with click-to-locate when you are mentioned.
 - **Replies** — reply to an earlier message; the reply shows a quote of the original that you can click to jump straight to it.
 - **Joined channels** — the landing page lists the channels you have joined (alongside the ones you own), so you can return to them without remembering the code.
+- **Desktop notifications & sound** — opt in, per channel, to a browser notification and/or a sound for new messages. Turning message notifications off still alerts you for @-mentions and announcements. Browser pop-ups appear only when the tab is in the background.
 - **Inline media & link previews** — images, video and audio appear inline and open in a lightbox.
 - **Live presence** — see how many people are currently online in a channel.
 - **Text & file sharing** — send messages or drop a file; every member sees it instantly.

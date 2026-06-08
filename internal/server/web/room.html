@@ -21,6 +21,14 @@
     <div class="room-side">
       <span id="online" class="online-count" data-i18n-title="room.online_title" title="People online">🟢 0</span>
       <button id="notify-btn" class="icon-button" type="button" data-i18n-title="room.mentions" title="Mentions" hidden>🔔<span id="notify-count" class="notify-count">0</span></button>
+      <div class="notif-cfg">
+        <button id="notif-cfg-btn" class="icon-button" type="button" data-i18n-title="notif.settings_title" title="Notification settings" aria-haspopup="true" aria-expanded="false">🛎️</button>
+        <div id="notif-cfg-panel" class="notif-cfg-panel" hidden>
+          <label class="check"><input type="checkbox" id="notif-messages"> <span data-i18n="notif.messages">Notify on new messages</span></label>
+          <label class="check"><input type="checkbox" id="notif-sound"> <span data-i18n="notif.sound">Play a sound</span></label>
+          <p class="notif-cfg-hint" data-i18n="notif.hint">Mentions and announcements always notify.</p>
+        </div>
+      </div>
       <button id="join-btn" class="pill-button" type="button" hidden data-i18n="room.join">Join</button>
       <button id="settings-btn" class="icon-button" type="button" data-i18n-title="room.settings" title="Channel settings" hidden>⚙️</button>
       <label class="theme-picker">
