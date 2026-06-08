@@ -653,7 +653,12 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		ctype = "application/octet-stream"
 	}
 
-	m := rm.AddFile(u.Name, u.UID, name, ctype, data)
+	// An optional caption lets a file be sent together with a describing message
+	// as a single entry. Inline previews are opt-in, mirroring text messages.
+	caption := strings.TrimSpace(r.FormValue("text"))
+	preview := r.FormValue("preview") == "1" || r.FormValue("preview") == "true"
+
+	m := rm.AddFile(u.Name, u.UID, name, ctype, data, caption, parseMentions(caption), preview)
 	writeJSON(w, http.StatusCreated, m)
 }
 

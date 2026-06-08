@@ -5,12 +5,23 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NekoDrop · quick file & message sharing</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/theme.js"></script>
 </head>
 <body class="landing">
   <main class="landing-wrap">
     <section class="card">
       <div class="card-head">
         <h1 class="logo">🐱 NekoDrop</h1>
+        <div class="head-pickers">
+        <label class="theme-picker">
+          <span class="theme-icon" aria-hidden="true">🌓</span>
+          <span class="sr-only" data-i18n="theme.label">Theme</span>
+          <select class="theme-select" aria-label="Theme">
+            <option value="auto" data-i18n="theme.auto">Auto</option>
+            <option value="dark" data-i18n="theme.dark">Dark</option>
+            <option value="light" data-i18n="theme.light">Light</option>
+          </select>
+        </label>
         <label class="lang-picker">
           <span class="lang-icon" aria-hidden="true">🌐</span>
           <span class="sr-only" data-i18n="lang.label">Language</span>
@@ -23,6 +34,7 @@
             <option value="ru">Русский</option>
           </select>
         </label>
+        </div>
       </div>
       <p class="tagline" data-i18n="app.tagline">Drop a code, share files and messages instantly.</p>
 

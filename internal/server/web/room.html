@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NekoDrop channel</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/theme.js"></script>
 </head>
 <body class="room">
   <header class="room-header">
@@ -22,6 +23,14 @@
       <button id="notify-btn" class="icon-button" type="button" data-i18n-title="room.mentions" title="Mentions" hidden>🔔<span id="notify-count" class="notify-count">0</span></button>
       <button id="join-btn" class="pill-button" type="button" hidden data-i18n="room.join">Join</button>
       <button id="settings-btn" class="icon-button" type="button" data-i18n-title="room.settings" title="Channel settings" hidden>⚙️</button>
+      <label class="theme-picker">
+        <span class="theme-icon" aria-hidden="true">🌓</span>
+        <select class="theme-select" aria-label="Theme">
+          <option value="auto" data-i18n="theme.auto">Auto</option>
+          <option value="dark" data-i18n="theme.dark">Dark</option>
+          <option value="light" data-i18n="theme.light">Light</option>
+        </select>
+      </label>
       <label class="lang-picker">
         <span class="lang-icon" aria-hidden="true">🌐</span>
         <select class="lang-select" aria-label="Language">
@@ -66,9 +75,6 @@
       <input id="text-input" type="text" data-i18n-placeholder="room.msg_ph" placeholder="Type a message… use @ to mention" autocomplete="off">
       <ul id="mention-pop" class="mention-pop" hidden></ul>
     </div>
-    <label class="preview-toggle" title="Render links & media inline for everyone">
-      <input id="preview-toggle" type="checkbox" checked> <span data-i18n="room.preview">preview</span>
-    </label>
     <button id="send" type="submit" data-i18n="room.send">Send</button>
   </form>
 

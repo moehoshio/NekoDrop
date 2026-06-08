@@ -41,7 +41,9 @@ Then open <http://localhost:8080> in your browser, enter a room code (or generat
 - **Text & file sharing** — send messages or drop a file; every member sees it instantly.
 - **Real-time updates** — powered by Server-Sent Events, no page refresh needed. The public directory and your own channels refresh themselves live — no manual refresh button.
 - **Multi-language UI** — English, 繁體中文, 简体中文, 日本語, Español and Русский built in. Auto-detected from the browser on first visit, switchable from a 🌐 picker, and remembered in a cookie.
-- **Paste & drop attachments** — paste an image from the clipboard or drop files onto the chat; preview and remove them before sending.
+- **Light & dark themes** — auto, dark or light, switchable from a 🌓 picker. *Auto* follows the operating system's colour scheme and updates live; the choice is remembered in a cookie.
+- **Paste & drop attachments** — paste an image from the clipboard or drop files onto the chat; click a staged file to preview its contents or info, and remove it, before sending.
+- **Files with a caption** — type a message while a file is staged and the two are sent as a single message describing the file; or send the file on its own.
 - **Pluggable storage** — keep everything in memory (default) or persist to SQLite or MySQL so channels and history survive restarts.
 - **Configurable** — a JSON config file plus environment variables and flags control the listen address, limits and storage.
 
@@ -159,7 +161,7 @@ The web UI is the primary interface, but the underlying HTTP API is straightforw
 | `POST /api/channels/{room}/announcements` | Post an announcement (owner/admin) |
 | `GET /api/stream/{room}` | Server-Sent Events stream (announcements, history, presence + live events) |
 | `POST /api/messages/{room}` | Send a text message (`{sender,text,preview}`) |
-| `POST /api/files/{room}` | Upload a file (multipart `file`, `sender`) |
+| `POST /api/files/{room}` | Upload a file (multipart `file`, `sender`, optional `text` caption + `preview`) |
 | `GET /api/files/{room}/{id}` | Download a shared file (`?inline=1` renders whitelisted media inline) |
 
 ## Releases

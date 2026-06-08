@@ -53,7 +53,7 @@ func TestAddFileStoresPayload(t *testing.T) {
 	r := newRoom("test", "id1")
 	data := []byte("file-bytes")
 
-	m := r.AddFile("bob", "101", "notes.txt", "text/plain", data)
+	m := r.AddFile("bob", "101", "notes.txt", "text/plain", data, "", nil, false)
 	if m.Kind != KindFile || m.FileName != "notes.txt" || m.FileSize != int64(len(data)) {
 		t.Fatalf("unexpected file message: %+v", m)
 	}

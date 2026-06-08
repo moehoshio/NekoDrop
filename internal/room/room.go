@@ -597,14 +597,18 @@ func (r *Room) AddText(sender, senderUID, text string, mentions []string, previe
 }
 
 // AddFile stores a file payload, records a file message referencing it, and
-// broadcasts the message.
-func (r *Room) AddFile(sender, senderUID, name, contentType string, data []byte) Message {
+// broadcasts the message. An optional caption (text) may accompany the file so a
+// file and its description are delivered as a single message.
+func (r *Room) AddFile(sender, senderUID, name, contentType string, data []byte, text string, mentions []string, preview bool) Message {
 	f := &File{ID: newID(12), Name: name, ContentType: contentType, Data: data}
 	m := Message{
 		ID:        newID(12),
 		Kind:      KindFile,
 		Sender:    sender,
 		SenderUID: senderUID,
+		Text:      text,
+		Mentions:  mentions,
+		Preview:   preview,
 		FileID:    f.ID,
 		FileName:  name,
 		FileSize:  f.Size(),
