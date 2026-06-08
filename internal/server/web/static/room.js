@@ -35,6 +35,11 @@
     notifyBtn: document.getElementById("notify-btn"),
     notifyCount: document.getElementById("notify-count"),
     mentionPop: document.getElementById("mention-pop"),
+    // notification settings
+    notifCfgBtn: document.getElementById("notif-cfg-btn"),
+    notifCfgPanel: document.getElementById("notif-cfg-panel"),
+    notifMessages: document.getElementById("notif-messages"),
+    notifSound: document.getElementById("notif-sound"),
     // attachments
     attachBar: document.getElementById("attach-bar"),
     attachList: document.getElementById("attach-list"),
@@ -73,6 +78,8 @@
   let replyTarget = null; // { id, uid } the next message replies to
 
   const NICK_KEY = "nekodrop_nick:" + roomKey;
+  const NOTIFY_MSGS_KEY = "nekodrop_notify_msgs:" + roomKey;
+  const NOTIFY_SOUND_KEY = "nekodrop_notify_sound:" + roomKey;
 
   const MENTION_RE = /@[^\s#@]+#(\d+)/g;
   const URL_RE = /(https?:\/\/[^\s]+)/g;
@@ -339,6 +346,12 @@
       if (historyLoaded) notifyMention(item);
     }
 
+    // Live messages (not history replay, not my own) may raise a notification.
+    if (historyLoaded && msg.senderUid && msg.senderUid !== me.uid) {
+      const preview = msg.text || (msg.fileName ? "📎 " + msg.fileName : "");
+      maybeNotify(mentionsMe ? "mention" : "message", msg.sender, preview);
+    }
+
     item.appendChild(body);
 
     const atBottom =
@@ -363,6 +376,8 @@
     box.appendChild(head);
     box.appendChild(body);
     els.announcements.appendChild(box);
+    // New announcements (after the initial replay) always notify.
+    if (historyLoaded) maybeNotify("announcement", a.authorName, a.text);
   }
 
   // ---------- mentions / notifications ----------
@@ -384,6 +399,130 @@
     els.notifyCount.textContent = "0";
     els.notifyCount.hidden = true;
   });
+
+  // ---------- notification settings (browser notification + sound) ----------
+  // Per-channel, per-visitor preferences kept in localStorage. When message
+  // notifications are off, mentions and announcements still notify — those are
+  // always-on so you never miss being addressed directly or a pinned notice.
+  const notifPrefs = {
+    messages: loadPref(NOTIFY_MSGS_KEY, false),
+    sound: loadPref(NOTIFY_SOUND_KEY, false),
+  };
+
+  function loadPref(key, dflt) {
+    try {
+      const v = window.localStorage.getItem(key);
+      return v === null ? dflt : v === "1";
+    } catch (e) { return dflt; }
+  }
+  function savePref(key, on) {
+    try { window.localStorage.setItem(key, on ? "1" : "0"); } catch (e) { /* ignore */ }
+  }
+
+  // The page is "away" when it is hidden or unfocused; browser notifications are
+  // only raised then, so they never duplicate what you are actively reading.
+  function isAway() {
+    return document.visibilityState === "hidden" || (document.hasFocus && !document.hasFocus());
+  }
+
+  let audioCtx = null;
+  function playBeep() {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      audioCtx = audioCtx || new Ctx();
+      if (audioCtx.state === "suspended") audioCtx.resume();
+      const now = audioCtx.currentTime;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(660, now);
+      osc.frequency.setValueAtTime(880, now + 0.09);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.16, now + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(now);
+      osc.stop(now + 0.3);
+    } catch (e) { /* ignore audio failures */ }
+  }
+
+  function showBrowserNotification(title, body) {
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    try {
+      const n = new Notification(title, {
+        body: body || "",
+        tag: "nekodrop:" + roomKey,
+        renotify: true,
+      });
+      n.onclick = function () { window.focus(); n.close(); };
+    } catch (e) { /* ignore */ }
+  }
+
+  function ensureNotifyPermission() {
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission().catch(function () { /* ignore */ });
+    }
+  }
+
+  // Raise the configured notifications for a qualifying live event. kind is
+  // "mention", "announcement" (both always notify) or "message" (gated by the
+  // message toggle). Sound and browser pop-up are each opt-in.
+  function maybeNotify(kind, who, text) {
+    const qualifies = kind === "mention" || kind === "announcement" || (kind === "message" && notifPrefs.messages);
+    if (!qualifies) return;
+    if (notifPrefs.sound) playBeep();
+    if (!isAway()) return;
+    let title = channel && channel.name ? channel.name : roomKey;
+    let body;
+    if (kind === "announcement") {
+      body = "📢 " + (who || "") + ": " + (text || "");
+    } else {
+      const prefix = kind === "mention" ? "@ " : "";
+      body = prefix + (who || "anonymous") + ": " + (text || "");
+    }
+    showBrowserNotification(title, body);
+  }
+
+  function refreshNotifBtn() {
+    const on = notifPrefs.messages || notifPrefs.sound;
+    els.notifCfgBtn.classList.toggle("is-on", on);
+  }
+
+  function bindNotifSettings() {
+    els.notifMessages.checked = notifPrefs.messages;
+    els.notifSound.checked = notifPrefs.sound;
+    refreshNotifBtn();
+
+    els.notifCfgBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      const open = els.notifCfgPanel.hidden;
+      els.notifCfgPanel.hidden = !open;
+      els.notifCfgBtn.setAttribute("aria-expanded", String(open));
+    });
+    // Dismiss the popover on an outside click.
+    document.addEventListener("click", function (e) {
+      if (els.notifCfgPanel.hidden) return;
+      if (e.target === els.notifCfgBtn || els.notifCfgPanel.contains(e.target)) return;
+      els.notifCfgPanel.hidden = true;
+      els.notifCfgBtn.setAttribute("aria-expanded", "false");
+    });
+
+    els.notifMessages.addEventListener("change", function () {
+      notifPrefs.messages = els.notifMessages.checked;
+      savePref(NOTIFY_MSGS_KEY, notifPrefs.messages);
+      if (notifPrefs.messages) ensureNotifyPermission();
+      refreshNotifBtn();
+    });
+    els.notifSound.addEventListener("change", function () {
+      notifPrefs.sound = els.notifSound.checked;
+      savePref(NOTIFY_SOUND_KEY, notifPrefs.sound);
+      // Prime the audio context with the user gesture and give instant feedback.
+      if (notifPrefs.sound) playBeep();
+      refreshNotifBtn();
+    });
+  }
 
   // ---------- mention picker ----------
   let mentionAnchor = -1;
@@ -1107,6 +1246,7 @@
 
   (async function init() {
     loadNick();
+    bindNotifSettings();
     await loadMe();
     const view = await loadChannel();
     if (view && view.role && !view.role.canRead) {
