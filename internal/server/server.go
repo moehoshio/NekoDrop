@@ -111,6 +111,8 @@ func (s *Server) routes() {
 	// Messaging & files.
 	s.mux.HandleFunc("GET /api/stream/{room}", s.handleStream)
 	s.mux.HandleFunc("POST /api/messages/{room}", s.handlePostMessage)
+	s.mux.HandleFunc("PATCH /api/messages/{room}/{id}", s.handleEditMessage)
+	s.mux.HandleFunc("DELETE /api/messages/{room}/{id}", s.handleDeleteMessage)
 	s.mux.HandleFunc("POST /api/files/{room}", s.handleUpload)
 	s.mux.HandleFunc("GET /api/files/{room}/{id}", s.handleDownload)
 }
@@ -429,6 +431,9 @@ func (s *Server) handleModerate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Action string `json:"action"`
 		UID    string `json:"uid"`
+		// PurgeMessages, valid with the "ban" action, additionally deletes every
+		// message the banned member ever sent in this channel.
+		PurgeMessages bool `json:"purgeMessages"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -437,6 +442,12 @@ func (s *Server) handleModerate(w http.ResponseWriter, r *http.Request) {
 	if err := rm.Moderate(u.UID, req.Action, req.UID); err != nil {
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
+	}
+	if req.Action == "ban" && req.PurgeMessages {
+		if _, err := rm.PurgeMessagesBy(u.UID, req.UID); err != nil {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"channel": rm.Info(),
@@ -619,6 +630,50 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	display := rm.ApplyNick(u.UID, u.Name, req.Nick)
 	m := rm.AddText(display, u.UID, text, parseMentions(text), req.Preview, req.ReplyTo)
 	writeJSON(w, http.StatusCreated, m)
+}
+
+// handleEditMessage lets a sender rewrite the text of their own message.
+func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
+	rm, u, ok := s.lookupForAction(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	var req struct {
+		Text string `json:"text"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	text := strings.TrimSpace(req.Text)
+	m, err := rm.EditMessage(u.UID, id, text, parseMentions(text))
+	if err != nil {
+		status := http.StatusForbidden
+		if err == room.ErrMessageNotFound {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
+
+// handleDeleteMessage removes a message: senders their own, admins anyone's.
+func (s *Server) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
+	rm, u, ok := s.lookupForAction(w, r)
+	if !ok {
+		return
+	}
+	if err := rm.DeleteMessage(u.UID, r.PathValue("id")); err != nil {
+		status := http.StatusForbidden
+		if err == room.ErrMessageNotFound {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {

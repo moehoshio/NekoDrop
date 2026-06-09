@@ -111,3 +111,60 @@ func TestSQLiteChannelAndHistoryRoundTrip(t *testing.T) {
 		t.Fatalf("channel not deleted: %+v", chans)
 	}
 }
+
+// TestSQLiteMessageDeletion verifies single-message deletion, per-sender
+// purging, and that purging sweeps the file payloads those messages owned.
+func TestSQLiteMessageDeletion(t *testing.T) {
+	st := newSQLite(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	msgs := []Message{
+		{ID: "m1", ChannelID: "ch", Kind: "text", Sender: "Bob", SenderUID: "1", Text: "a", Time: now},
+		{ID: "m2", ChannelID: "ch", Kind: "file", Sender: "Bob", SenderUID: "1", FileID: "f1", FileName: "x.bin", Time: now},
+		{ID: "m3", ChannelID: "ch", Kind: "text", Sender: "Eve", SenderUID: "2", Text: "b", Edited: true, Time: now},
+	}
+	for _, m := range msgs {
+		if err := st.AppendMessage(m); err != nil {
+			t.Fatalf("append %s: %v", m.ID, err)
+		}
+	}
+	if err := st.SaveFile(File{ID: "f1", ChannelID: "ch", Name: "x.bin", Data: []byte{1}}); err != nil {
+		t.Fatalf("save file: %v", err)
+	}
+
+	if err := st.DeleteMessage("m3"); err != nil {
+		t.Fatalf("delete message: %v", err)
+	}
+	if err := st.DeleteMessagesBySender("ch", "1"); err != nil {
+		t.Fatalf("purge sender: %v", err)
+	}
+	got, err := st.LoadMessages("ch")
+	if err != nil {
+		t.Fatalf("load messages: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("messages after deletion = %+v, want none", got)
+	}
+	if _, found, err := st.LoadFile("f1"); err != nil || found {
+		t.Fatalf("purged file still present (found=%v err=%v)", found, err)
+	}
+}
+
+// TestSQLiteEditedFlagRoundTrip verifies the edited flag survives persistence.
+func TestSQLiteEditedFlagRoundTrip(t *testing.T) {
+	st := newSQLite(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := st.AppendMessage(Message{ID: "m1", ChannelID: "ch", Kind: "text", SenderUID: "1", Text: "v1", Time: now}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	// An edit re-appends the same ID with new text; REPLACE must overwrite.
+	if err := st.AppendMessage(Message{ID: "m1", ChannelID: "ch", Kind: "text", SenderUID: "1", Text: "v2", Edited: true, Time: now}); err != nil {
+		t.Fatalf("re-append: %v", err)
+	}
+	got, err := st.LoadMessages("ch")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(got) != 1 || got[0].Text != "v2" || !got[0].Edited {
+		t.Fatalf("messages = %+v, want one edited v2", got)
+	}
+}

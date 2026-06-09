@@ -59,6 +59,7 @@ type Message struct {
 	FileName  string      `json:"fileName,omitempty"`
 	FileSize  int64       `json:"fileSize,omitempty"`
 	FileType  string      `json:"fileType,omitempty"`
+	Edited    bool        `json:"edited,omitempty"`
 	Time      time.Time   `json:"time"`
 }
 
@@ -100,6 +101,13 @@ const (
 	// or per-channel nickname) changed, so clients can relabel that user's
 	// existing messages and mentions live.
 	EventIdentity EventKind = "identity"
+	// EventMessageEdited carries the new content of an edited message.
+	EventMessageEdited EventKind = "message_edited"
+	// EventMessageDeleted reports that a single message was removed.
+	EventMessageDeleted EventKind = "message_deleted"
+	// EventMessagesPurged reports that every message by one sender was removed
+	// (an admin banned them and chose to also delete their messages).
+	EventMessagesPurged EventKind = "messages_purged"
 )
 
 // Identity is the payload of an EventIdentity: a participant's UID and their
@@ -118,6 +126,8 @@ type Event struct {
 	Announcement *Announcement `json:"announcement,omitempty"`
 	Channel      *Info         `json:"channel,omitempty"`
 	Identity     *Identity     `json:"identity,omitempty"`
+	MessageID    string        `json:"messageId,omitempty"`
+	PurgedUID    string        `json:"purgedUid,omitempty"`
 }
 
 // Settings is the mutable, owner-controlled configuration of a channel.
@@ -156,6 +166,8 @@ var (
 	ErrChannelExists = errors.New("channel key already in use")
 	// ErrChannelNotFound is returned when a channel key/ID is unknown.
 	ErrChannelNotFound = errors.New("channel not found")
+	// ErrMessageNotFound is returned when a requested message does not exist.
+	ErrMessageNotFound = errors.New("message not found")
 	// ErrLimitReached is returned when an owner hits their channel quota.
 	ErrLimitReached = errors.New("channel creation limit reached")
 )
@@ -729,7 +741,144 @@ func (r *Room) messageRecord(m Message) storage.Message {
 		FileName:  m.FileName,
 		FileSize:  m.FileSize,
 		FileType:  m.FileType,
+		Edited:    m.Edited,
 		Time:      m.Time,
+	}
+}
+
+// EditMessage replaces the text of a message previously sent by actorUID and
+// broadcasts the updated message. Only the sender may edit their own messages,
+// and only while they are still allowed to speak (otherwise editing old
+// messages would bypass a mute or ban). File attachments are untouched; for
+// file messages the edit applies to the caption.
+func (r *Room) EditMessage(actorUID, id, text string, mentions []string) (Message, error) {
+	r.mu.Lock()
+	idx := -1
+	for i := range r.messages {
+		if r.messages[i].ID == id {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		r.mu.Unlock()
+		return Message{}, ErrMessageNotFound
+	}
+	m := r.messages[idx]
+	if actorUID == "" || m.SenderUID != actorUID {
+		r.mu.Unlock()
+		return Message{}, errors.New("you can only edit your own messages")
+	}
+	if !r.canSpeak(actorUID) {
+		r.mu.Unlock()
+		return Message{}, errors.New("you are not allowed to speak in this channel")
+	}
+	if m.Kind == KindText && strings.TrimSpace(text) == "" {
+		r.mu.Unlock()
+		return Message{}, errors.New("message text is required")
+	}
+	m.Text = text
+	m.Mentions = mentions
+	m.Edited = true
+	r.messages[idx] = m
+	r.lastActive = time.Now()
+	r.mu.Unlock()
+	if r.store != nil {
+		_ = r.store.AppendMessage(r.messageRecord(m))
+	}
+	r.broadcast(Event{Type: EventMessageEdited, Message: &m})
+	return m, nil
+}
+
+// DeleteMessage removes a single message (and its file payload, if any) and
+// broadcasts the deletion. The sender may always delete their own messages;
+// owners and admins may delete anyone's except, for non-owner admins, the
+// owner's (mirroring the moderation model where the owner is untouchable).
+func (r *Room) DeleteMessage(actorUID, id string) error {
+	r.mu.Lock()
+	idx := -1
+	for i := range r.messages {
+		if r.messages[i].ID == id {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		r.mu.Unlock()
+		return ErrMessageNotFound
+	}
+	m := r.messages[idx]
+	own := actorUID != "" && m.SenderUID == actorUID
+	if !own && !r.isAdmin(actorUID) {
+		r.mu.Unlock()
+		return errors.New("you can only delete your own messages")
+	}
+	if !own && r.isOwner(m.SenderUID) && !r.isOwner(actorUID) {
+		r.mu.Unlock()
+		return errors.New("the owner's messages cannot be deleted")
+	}
+	r.removeMessageAtLocked(idx)
+	r.lastActive = time.Now()
+	r.mu.Unlock()
+	if r.store != nil {
+		_ = r.store.DeleteMessage(id)
+		if m.Kind == KindFile && m.FileID != "" {
+			_ = r.store.DeleteFile(m.FileID)
+		}
+	}
+	r.broadcast(Event{Type: EventMessageDeleted, MessageID: id})
+	return nil
+}
+
+// PurgeMessagesBy removes every message sent by targetUID (used when banning a
+// member with "also delete their messages"). Only admins may purge, and the
+// owner's messages can never be purged. It returns how many resident messages
+// were removed; the durable store is swept as well, so evicted history is also
+// erased.
+func (r *Room) PurgeMessagesBy(actorUID, targetUID string) (int, error) {
+	r.mu.Lock()
+	if !r.isAdmin(actorUID) {
+		r.mu.Unlock()
+		return 0, errors.New("not authorized")
+	}
+	if targetUID == "" {
+		r.mu.Unlock()
+		return 0, errors.New("invalid target")
+	}
+	if r.isOwner(targetUID) {
+		r.mu.Unlock()
+		return 0, errors.New("the owner cannot be moderated")
+	}
+	removed := 0
+	for i := len(r.messages) - 1; i >= 0; i-- {
+		if r.messages[i].SenderUID == targetUID {
+			r.removeMessageAtLocked(i)
+			removed++
+		}
+	}
+	if removed > 0 {
+		r.lastActive = time.Now()
+	}
+	r.mu.Unlock()
+	if r.store != nil {
+		_ = r.store.DeleteMessagesBySender(r.ID, targetUID)
+	}
+	if removed > 0 {
+		r.broadcast(Event{Type: EventMessagesPurged, PurgedUID: targetUID})
+	}
+	return removed, nil
+}
+
+// removeMessageAtLocked deletes the message at index i, freeing its file
+// payload if it owned one. The caller holds r.mu.
+func (r *Room) removeMessageAtLocked(i int) {
+	m := r.messages[i]
+	r.messages = append(r.messages[:i], r.messages[i+1:]...)
+	if m.Kind == KindFile && m.FileID != "" {
+		if f, ok := r.files[m.FileID]; ok {
+			r.fileBytes -= int64(len(f.Data))
+			delete(r.files, m.FileID)
+		}
 	}
 }
 
@@ -1159,7 +1308,7 @@ func (h *Hub) restore() {
 					ID: m.ID, Kind: MessageKind(m.Kind), Sender: m.Sender, SenderUID: m.SenderUID,
 					Text: m.Text, Mentions: m.Mentions, ReplyTo: m.ReplyTo, Preview: m.Preview,
 					FileID: m.FileID, FileName: m.FileName, FileSize: m.FileSize, FileType: m.FileType,
-					Time: m.Time,
+					Edited: m.Edited, Time: m.Time,
 				})
 			}
 		}

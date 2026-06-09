@@ -136,6 +136,7 @@ func (s *sqlStore) migrate(d dialect) error {
 			file_name ` + d.textType + ` NOT NULL,
 			file_size BIGINT NOT NULL,
 			file_type ` + d.textType + ` NOT NULL,
+			edited BOOLEAN NOT NULL,
 			created DATETIME NOT NULL,
 			PRIMARY KEY (id)
 		)`,
@@ -171,6 +172,7 @@ func (s *sqlStore) migrate(d dialect) error {
 	for _, q := range []string{
 		`ALTER TABLE channels ADD COLUMN nicks ` + d.textType + ` NOT NULL DEFAULT '{}'`,
 		`ALTER TABLE messages ADD COLUMN reply_to VARCHAR(64) NOT NULL DEFAULT ''`,
+		`ALTER TABLE messages ADD COLUMN edited BOOLEAN NOT NULL DEFAULT 0`,
 	} {
 		_, _ = s.db.Exec(q)
 	}
@@ -266,7 +268,7 @@ func (s *sqlStore) DeleteChannel(id string) error {
 
 func (s *sqlStore) LoadMessages(channelID string) ([]Message, error) {
 	rows, err := s.db.Query(`SELECT id, channel_id, kind, sender, sender_uid, body, mentions,
-		reply_to, preview, file_id, file_name, file_size, file_type, created
+		reply_to, preview, file_id, file_name, file_size, file_type, edited, created
 		FROM messages WHERE channel_id = ? ORDER BY created ASC, id ASC`, channelID)
 	if err != nil {
 		return nil, err
@@ -278,7 +280,7 @@ func (s *sqlStore) LoadMessages(channelID string) ([]Message, error) {
 		var mentions string
 		var created time.Time
 		if err := rows.Scan(&m.ID, &m.ChannelID, &m.Kind, &m.Sender, &m.SenderUID, &m.Text, &mentions,
-			&m.ReplyTo, &m.Preview, &m.FileID, &m.FileName, &m.FileSize, &m.FileType, &created); err != nil {
+			&m.ReplyTo, &m.Preview, &m.FileID, &m.FileName, &m.FileSize, &m.FileType, &m.Edited, &created); err != nil {
 			return nil, err
 		}
 		m.Mentions = decodeSlice(mentions)
@@ -293,10 +295,31 @@ func (s *sqlStore) AppendMessage(m Message) error {
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(`REPLACE INTO messages
 		(id, channel_id, kind, sender, sender_uid, body, mentions,
-		 reply_to, preview, file_id, file_name, file_size, file_type, created)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 reply_to, preview, file_id, file_name, file_size, file_type, edited, created)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.ID, m.ChannelID, m.Kind, m.Sender, m.SenderUID, m.Text, encodeSlice(m.Mentions),
-		m.ReplyTo, m.Preview, m.FileID, m.FileName, m.FileSize, m.FileType, m.Time.UTC())
+		m.ReplyTo, m.Preview, m.FileID, m.FileName, m.FileSize, m.FileType, m.Edited, m.Time.UTC())
+	return err
+}
+
+func (s *sqlStore) DeleteMessage(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`DELETE FROM messages WHERE id = ?`, id)
+	return err
+}
+
+func (s *sqlStore) DeleteMessagesBySender(channelID, senderUID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Drop the file payloads owned by the doomed messages first, then the
+	// messages themselves.
+	if _, err := s.db.Exec(`DELETE FROM files WHERE id IN
+		(SELECT file_id FROM messages WHERE channel_id = ? AND sender_uid = ? AND file_id <> '')`,
+		channelID, senderUID); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`DELETE FROM messages WHERE channel_id = ? AND sender_uid = ?`, channelID, senderUID)
 	return err
 }
 
@@ -320,6 +343,13 @@ func (s *sqlStore) SaveFile(f File) error {
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(`REPLACE INTO files (id, channel_id, name, content_type, data) VALUES (?, ?, ?, ?, ?)`,
 		f.ID, f.ChannelID, f.Name, f.ContentType, f.Data)
+	return err
+}
+
+func (s *sqlStore) DeleteFile(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`DELETE FROM files WHERE id = ?`, id)
 	return err
 }
 

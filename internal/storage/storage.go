@@ -67,6 +67,7 @@ type Message struct {
 	FileName  string
 	FileSize  int64
 	FileType  string
+	Edited    bool
 	Time      time.Time
 }
 
@@ -109,10 +110,15 @@ type Store interface {
 	// Messages.
 	LoadMessages(channelID string) ([]Message, error)
 	AppendMessage(Message) error
+	DeleteMessage(id string) error
+	// DeleteMessagesBySender removes every message a sender posted in a channel,
+	// along with the file payloads those messages owned.
+	DeleteMessagesBySender(channelID, senderUID string) error
 
 	// Files.
 	LoadFile(id string) (File, bool, error)
 	SaveFile(File) error
+	DeleteFile(id string) error
 
 	// Announcements.
 	LoadAnnouncements(channelID string) ([]Announcement, error)
@@ -155,8 +161,11 @@ func (*Memory) SaveChannel(Channel) error                        { return nil }
 func (*Memory) DeleteChannel(string) error                       { return nil }
 func (*Memory) LoadMessages(string) ([]Message, error)           { return nil, nil }
 func (*Memory) AppendMessage(Message) error                      { return nil }
+func (*Memory) DeleteMessage(string) error                       { return nil }
+func (*Memory) DeleteMessagesBySender(string, string) error      { return nil }
 func (*Memory) LoadFile(string) (File, bool, error)              { return File{}, false, nil }
 func (*Memory) SaveFile(File) error                              { return nil }
+func (*Memory) DeleteFile(string) error                          { return nil }
 func (*Memory) LoadAnnouncements(string) ([]Announcement, error) { return nil, nil }
 func (*Memory) AppendAnnouncement(Announcement) error            { return nil }
 func (*Memory) Close() error                                     { return nil }
