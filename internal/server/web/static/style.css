@@ -524,10 +524,12 @@ video.media-preview { cursor: default; }
 .composer input[type="text"]:disabled { opacity: 0.6; }
 
 /* Per-channel nickname input, left of the message box. It is capped to a small
-   share of the composer (and may shrink) so it never crowds the message box. */
-.nick-input {
-  flex: 0 1 auto;
-  width: clamp(72px, 16%, 120px);
+   fixed-size box so it never crowds the message box; long nicks scroll inside
+   the input natively while editing and are ellipsized otherwise. The selector
+   must out-rank the generic `input[type="text"] { width: 100% }` rule. */
+.composer input.nick-input {
+  flex: 0 0 auto;
+  width: clamp(72px, 12%, 110px);
   min-width: 0;
   color: var(--accent);
   font-weight: 600;
