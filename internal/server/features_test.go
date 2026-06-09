@@ -240,3 +240,133 @@ func TestSQLitePersistenceAcrossRestart(t *testing.T) {
 		t.Fatalf("restored public list = %+v, want one Persisted channel", resp.Channels)
 	}
 }
+
+// channelHistory snapshots a channel's resident messages via a throwaway
+// subscription.
+func channelHistory(t *testing.T, s *Server, key string) []room.Message {
+	t.Helper()
+	rm, ok := s.hub.Lookup(key)
+	if !ok {
+		t.Fatalf("channel %q not found", key)
+	}
+	history, _, _, cancel := rm.Subscribe("")
+	cancel()
+	return history
+}
+
+// TestEditOwnMessage verifies a sender can rewrite their own message, that the
+// edit is flagged, and that nobody else can edit it.
+func TestEditOwnMessage(t *testing.T) {
+	s := newTestServer(t)
+	owner := newClient(t, s)
+	owner.do("POST", "/api/channels", "application/json", `{"name":"Club"}`)
+	rec := owner.do("POST", "/api/messages/club", "application/json",
+		`{"sender":"Alice","text":"helo"}`)
+	var m room.Message
+	json.Unmarshal(rec.Body.Bytes(), &m)
+
+	rec = owner.do("PATCH", "/api/messages/club/"+m.ID, "application/json", `{"text":"hello"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("edit = %d: %s", rec.Code, rec.Body.String())
+	}
+	var edited room.Message
+	json.Unmarshal(rec.Body.Bytes(), &edited)
+	if edited.Text != "hello" || !edited.Edited {
+		t.Fatalf("edited message = %+v, want text hello with edited flag", edited)
+	}
+	if h := channelHistory(t, s, "club"); len(h) != 1 || h[0].Text != "hello" || !h[0].Edited {
+		t.Fatalf("history = %+v, want one edited hello", h)
+	}
+
+	// Another member must not be able to edit Alice's message.
+	bob := newClient(t, s)
+	bob.do("POST", "/api/channels/club/join", "", "")
+	rec = bob.do("PATCH", "/api/messages/club/"+m.ID, "application/json", `{"text":"hijack"}`)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("foreign edit = %d, want 403", rec.Code)
+	}
+
+	// Empty text is rejected for text messages.
+	rec = owner.do("PATCH", "/api/messages/club/"+m.ID, "application/json", `{"text":"  "}`)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("empty edit = %d, want 403", rec.Code)
+	}
+}
+
+// TestDeleteMessagePermissions verifies senders can delete their own messages,
+// admins can delete members' messages, and members cannot delete others'.
+func TestDeleteMessagePermissions(t *testing.T) {
+	s := newTestServer(t)
+	owner := newClient(t, s)
+	owner.do("POST", "/api/channels", "application/json", `{"name":"Club"}`)
+
+	bob := newClient(t, s)
+	bob.do("POST", "/api/channels/club/join", "", "")
+	rec := bob.do("POST", "/api/messages/club", "application/json",
+		`{"sender":"Bob","text":"mine"}`)
+	var bobMsg room.Message
+	json.Unmarshal(rec.Body.Bytes(), &bobMsg)
+	rec = owner.do("POST", "/api/messages/club", "application/json",
+		`{"sender":"Owner","text":"owner says"}`)
+	var ownerMsg room.Message
+	json.Unmarshal(rec.Body.Bytes(), &ownerMsg)
+
+	// A member cannot delete someone else's message.
+	if rec := bob.do("DELETE", "/api/messages/club/"+ownerMsg.ID, "", ""); rec.Code != http.StatusForbidden {
+		t.Fatalf("member deleting owner's message = %d, want 403", rec.Code)
+	}
+	// The sender can delete their own.
+	if rec := bob.do("DELETE", "/api/messages/club/"+bobMsg.ID, "", ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("self delete = %d, want 204", rec.Code)
+	}
+
+	// An admin (the owner) can delete a member's message.
+	rec = bob.do("POST", "/api/messages/club", "application/json",
+		`{"sender":"Bob","text":"again"}`)
+	json.Unmarshal(rec.Body.Bytes(), &bobMsg)
+	if rec := owner.do("DELETE", "/api/messages/club/"+bobMsg.ID, "", ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("admin delete = %d, want 204", rec.Code)
+	}
+	if h := channelHistory(t, s, "club"); len(h) != 1 || h[0].ID != ownerMsg.ID {
+		t.Fatalf("history = %+v, want only the owner's message", h)
+	}
+}
+
+// TestBanWithPurgeDeletesMessages verifies that banning with purgeMessages
+// removes everything the banned member sent, while a plain ban keeps history.
+func TestBanWithPurgeDeletesMessages(t *testing.T) {
+	s := newTestServer(t)
+	owner := newClient(t, s)
+	owner.do("POST", "/api/channels", "application/json", `{"name":"Club"}`)
+	owner.do("POST", "/api/messages/club", "application/json",
+		`{"sender":"Owner","text":"keep me"}`)
+
+	bob := newClient(t, s)
+	bob.do("POST", "/api/me", "application/json", `{"name":"Bob"}`)
+	bob.do("POST", "/api/channels/club/join", "", "")
+	bob.do("POST", "/api/messages/club", "application/json", `{"sender":"Bob","text":"spam 1"}`)
+	bob.do("POST", "/api/messages/club", "application/json", `{"sender":"Bob","text":"spam 2"}`)
+
+	rec := owner.do("GET", "/api/channels/club", "", "")
+	var view channelView
+	json.Unmarshal(rec.Body.Bytes(), &view)
+	bobUID := ""
+	for _, m := range view.Members {
+		if m.Name == "Bob" {
+			bobUID = m.UID
+		}
+	}
+	if bobUID == "" {
+		t.Fatalf("Bob not in roster: %+v", view.Members)
+	}
+
+	rec = owner.do("POST", "/api/channels/club/moderate", "application/json",
+		`{"action":"ban","uid":"`+bobUID+`","purgeMessages":true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ban+purge = %d: %s", rec.Code, rec.Body.String())
+	}
+	h := channelHistory(t, s, "club")
+	if len(h) != 1 || h[0].Text != "keep me" {
+		t.Fatalf("history after purge = %+v, want only the owner's message", h)
+	}
+}

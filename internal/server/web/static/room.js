@@ -284,6 +284,7 @@
     when.textContent = formatTime(msg.time);
     meta.appendChild(who);
     meta.appendChild(when);
+    if (msg.edited) meta.appendChild(editedMark());
     // A reply action lets this message be quoted by the next one sent.
     const replyBtn = document.createElement("button");
     replyBtn.type = "button";
@@ -292,6 +293,27 @@
     replyBtn.title = t("room.reply");
     replyBtn.addEventListener("click", () => startReply(msg.id));
     meta.appendChild(replyBtn);
+    // Senders may edit and delete their own messages; admins may also delete
+    // other members' messages.
+    const mine = !!msg.senderUid && msg.senderUid === me.uid;
+    if (mine) {
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "reply-action msg-action";
+      editBtn.textContent = "✎";
+      editBtn.title = t("msg.edit");
+      editBtn.addEventListener("click", () => startEdit(msg.id));
+      meta.appendChild(editBtn);
+    }
+    if (mine || (role && role.admin)) {
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "reply-action msg-action msg-delete";
+      delBtn.textContent = "🗑";
+      delBtn.title = t("msg.delete");
+      delBtn.addEventListener("click", () => deleteMessage(msg.id));
+      meta.appendChild(delBtn);
+    }
     item.appendChild(meta);
 
     const body = document.createElement("div");
@@ -652,6 +674,144 @@
     if (replyTarget) jumpToMessage(replyTarget.id);
   });
 
+  // ---------- editing & deleting messages ----------
+  function editedMark() {
+    const s = document.createElement("span");
+    s.className = "edited-mark";
+    s.textContent = t("msg.edited");
+    return s;
+  }
+
+  function messageItem(id) {
+    return els.messages.querySelector('.message[data-id="' + cssEscape(id) + '"]');
+  }
+
+  // Swap a message body into an inline editor. Enter (or Save) submits, Escape
+  // (or Cancel) restores the original rendering.
+  function startEdit(id) {
+    const item = messageItem(id);
+    const ref = messages.get(id);
+    if (!item || !ref || item.querySelector(".edit-box")) return;
+    const body = item.querySelector(".body");
+    const textEl = body.querySelector(".text");
+    if (textEl) textEl.hidden = true;
+
+    const box = document.createElement("form");
+    box.className = "edit-box";
+    const input = document.createElement("textarea");
+    input.className = "edit-input";
+    input.rows = 2;
+    input.value = ref.text;
+    const save = document.createElement("button");
+    save.type = "submit";
+    save.className = "mod-button ok";
+    save.textContent = t("msg.save");
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "mod-button";
+    cancel.textContent = t("msg.cancel");
+
+    function close() {
+      box.remove();
+      if (textEl) textEl.hidden = false;
+    }
+    cancel.addEventListener("click", close);
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") { close(); return; }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        box.requestSubmit();
+      }
+    });
+    box.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (text === ref.text.trim()) { close(); return; }
+      try {
+        const res = await api("/api/messages/" + encodeURIComponent(roomKey) + "/" + encodeURIComponent(id), {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: text }),
+        });
+        if (!res.ok) throw new Error((await res.text()).trim() || "edit failed");
+        applyEdit(await res.json());
+      } catch (err) {
+        close();
+        showNotice(err.message);
+        setTimeout(() => { els.notice.hidden = true; }, 4000);
+      }
+    });
+
+    const actions = document.createElement("div");
+    actions.className = "edit-actions";
+    actions.appendChild(save);
+    actions.appendChild(cancel);
+    box.appendChild(input);
+    box.appendChild(actions);
+    body.appendChild(box);
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  }
+
+  // Re-render an edited message's text in place and tag it as edited. Also fed
+  // by live "message_edited" events from other connections.
+  function applyEdit(m) {
+    if (!m || !m.id) return;
+    const ref = messages.get(m.id);
+    if (ref) ref.text = m.text || "";
+    const item = messageItem(m.id);
+    if (!item) return;
+    const body = item.querySelector(".body");
+    const box = body.querySelector(".edit-box");
+    if (box) box.remove();
+    let textEl = body.querySelector(".text");
+    if (m.text) {
+      if (!textEl) {
+        textEl = document.createElement("div");
+        textEl.className = "text";
+        const quote = body.querySelector(".reply-quote");
+        body.insertBefore(textEl, quote ? quote.nextSibling : body.firstChild);
+      }
+      textEl.hidden = false;
+      textEl.innerHTML = "";
+      renderText(textEl, m.text);
+    } else if (textEl) {
+      textEl.remove();
+    }
+    const meta = item.querySelector(".meta");
+    if (meta && !meta.querySelector(".edited-mark")) {
+      meta.insertBefore(editedMark(), meta.querySelector(".reply-action"));
+    }
+  }
+
+  function applyDelete(id) {
+    messages.delete(id);
+    const item = messageItem(id);
+    if (item) item.remove();
+  }
+
+  // Remove every rendered message by one sender (a ban-with-purge happened).
+  function applyPurge(uid) {
+    els.messages.querySelectorAll('.message[data-uid="' + cssEscape(uid) + '"]').forEach((el) => {
+      messages.delete(el.dataset.id);
+      el.remove();
+    });
+  }
+
+  async function deleteMessage(id) {
+    if (!window.confirm(t("msg.delete_confirm"))) return;
+    try {
+      const res = await api("/api/messages/" + encodeURIComponent(roomKey) + "/" + encodeURIComponent(id), {
+        method: "DELETE",
+      });
+      if (!res.ok && res.status !== 204) throw new Error((await res.text()).trim() || "delete failed");
+      applyDelete(id);
+    } catch (err) {
+      showNotice(err.message);
+      setTimeout(() => { els.notice.hidden = true; }, 4000);
+    }
+  }
+
   // ---------- channel info & roles ----------
   function applyChannel(info) {
     channel = info;
@@ -714,6 +874,9 @@
       try { ev = JSON.parse(e.data); } catch (err) { return; }
       switch (ev.type) {
         case "message": render(ev.message); break;
+        case "message_edited": if (ev.message) applyEdit(ev.message); break;
+        case "message_deleted": if (ev.messageId) applyDelete(ev.messageId); break;
+        case "messages_purged": if (ev.purgedUid) applyPurge(ev.purgedUid); break;
         case "announcement": renderAnnouncement(ev.announcement); break;
         case "identity":
           if (ev.identity) remember(ev.identity.uid, ev.identity.name);
@@ -1100,11 +1263,11 @@
     }
   });
 
-  async function moderate(action, uid) {
+  async function moderate(action, uid, extra) {
     const res = await api("/api/channels/" + encodeURIComponent(roomKey) + "/moderate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: action, uid: uid }),
+      body: JSON.stringify(Object.assign({ action: action, uid: uid }, extra || {})),
     });
     if (res.ok) {
       const data = await res.json();
@@ -1126,6 +1289,20 @@
     b.className = "mod-button" + (cls ? " " + cls : "");
     b.textContent = t(labelKey);
     b.addEventListener("click", () => moderate(action, uid));
+    return b;
+  }
+
+  // Banning asks whether to also wipe everything the member ever sent here.
+  function banButton(uid) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "mod-button danger";
+    b.textContent = t("mod.ban");
+    b.addEventListener("click", function () {
+      if (!window.confirm(t("mod.ban_confirm"))) return;
+      const purge = window.confirm(t("mod.ban_purge_confirm"));
+      moderate("ban", uid, { purgeMessages: purge });
+    });
     return b;
   }
 
@@ -1197,7 +1374,7 @@
       actions.appendChild(modButton("mod.kick", "kick", m.uid));
       actions.appendChild(m.banned
         ? modButton("mod.unban", "unban", m.uid, "ok")
-        : modButton("mod.ban", "ban", m.uid, "danger"));
+        : banButton(m.uid));
       li.appendChild(actions);
       els.memberList.appendChild(li);
     });

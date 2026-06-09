@@ -602,6 +602,28 @@ video.media-preview { cursor: default; }
 .message:hover .reply-action { opacity: 1; }
 .reply-action:hover { color: var(--accent); }
 
+/* Edit/delete affordances sit next to the reply arrow; only the first action
+   button (the reply arrow) pushes the group to the right. */
+.msg-action { margin-left: 0; }
+.msg-delete:hover { color: #e05555; }
+
+/* The "(edited)" marker in a message's meta row. */
+.edited-mark { color: var(--muted); font-size: 0.72rem; }
+
+/* Inline editor swapped into a message body while editing. */
+.edit-box { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.edit-input {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  color: inherit;
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.edit-actions { display: flex; gap: 8px; }
+
 .composer button[type="submit"] {
   padding: 12px 18px;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
