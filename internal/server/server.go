@@ -30,6 +30,14 @@ const DefaultMaxUploadBytes = 32 << 20
 // cookieName is the name of the cookie holding a visitor's identity token.
 const cookieName = "nekodrop_token"
 
+// maxMessageRunes caps the length of a message text or file caption. Without a
+// cap a single request (bounded only by the 1 MiB JSON body limit) could pin a
+// megabyte of text per message in every channel's resident history.
+const maxMessageRunes = 4096
+
+// maxAnnouncementRunes caps the length of an announcement.
+const maxAnnouncementRunes = 1000
+
 // Options configures a Server.
 type Options struct {
 	// MaxUploadBytes is the maximum accepted size of a single uploaded file.
@@ -85,8 +93,32 @@ func New(opts Options) (*Server, error) {
 
 // ServeHTTP implements http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h := w.Header()
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("X-Frame-Options", "DENY")
+	h.Set("Referrer-Policy", "same-origin")
+
+	// Reject state-changing requests that demonstrably come from another
+	// origin. Together with the SameSite cookie attribute this blocks CSRF.
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+	default:
+		if !sameOriginRequest(r) {
+			http.Error(w, "cross-origin request rejected", http.StatusForbidden)
+			return
+		}
+	}
 	s.mux.ServeHTTP(w, r)
 }
+
+// pageCSP is the Content-Security-Policy applied to the HTML pages. Scripts
+// and styles may only load from this origin; images and media may additionally
+// load from https (sender-chosen inline link previews) and blob: (staged
+// attachment thumbnails). frame-ancestors blocks clickjacking.
+const pageCSP = "default-src 'self'; script-src 'self'; style-src 'self'; " +
+	"img-src 'self' https: data: blob:; media-src 'self' https: blob:; " +
+	"connect-src 'self'; object-src 'none'; base-uri 'self'; " +
+	"form-action 'self'; frame-ancestors 'none'"
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /{$}", s.handleIndex)
@@ -133,6 +165,10 @@ func (s *Server) currentUser(w http.ResponseWriter, r *http.Request) *user.User 
 		Value:    u.Token,
 		Path:     "/",
 		HttpOnly: true,
+		// Mark the identity cookie Secure whenever the request arrived over
+		// TLS (directly or via a reverse proxy) so it is never replayed over
+		// plaintext HTTP.
+		Secure:   r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https"),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   60 * 60 * 24 * 365,
 	})
@@ -206,6 +242,9 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, name, ctype s
 	if ctype != "" {
 		w.Header().Set("Content-Type", ctype)
 	}
+	if strings.HasPrefix(ctype, "text/html") {
+		w.Header().Set("Content-Security-Policy", pageCSP)
+	}
 	_, _ = w.Write(data)
 }
 
@@ -259,9 +298,10 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 		allowSpeak = *req.AllowSpeak
 	}
 
+	// Apply the same length bounds Room.Update enforces on later edits.
 	rm, err := s.hub.Create(key, u.UID, room.Settings{
-		Name:            strings.TrimSpace(req.Name),
-		Description:     strings.TrimSpace(req.Description),
+		Name:            clampRunes(strings.TrimSpace(req.Name), 64),
+		Description:     clampRunes(strings.TrimSpace(req.Description), 280),
 		Visibility:      vis,
 		ListPublic:      req.ListPublic,
 		AllowJoin:       allowJoin,
@@ -477,9 +517,7 @@ func (s *Server) handleAnnounce(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "announcement text is required", http.StatusBadRequest)
 		return
 	}
-	if len([]rune(text)) > 1000 {
-		text = string([]rune(text)[:1000])
-	}
+	text = clampRunes(text, maxAnnouncementRunes)
 	a := rm.AddAnnouncement(u.UID, u.Name, text)
 	writeJSON(w, http.StatusCreated, a)
 }
@@ -617,6 +655,7 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "message text is required", http.StatusBadRequest)
 		return
 	}
+	text = clampRunes(text, maxMessageRunes)
 
 	u := s.resolveSender(w, r, req.Sender)
 	rm := s.hub.Room(key)
@@ -626,8 +665,9 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	// Resolve the display name from the channel nickname (when set), falling back
 	// to the global name. Messages are keyed by UID, so a later nickname change
-	// retroactively relabels this user's history.
-	display := rm.ApplyNick(u.UID, u.Name, req.Nick)
+	// retroactively relabels this user's history. Nicknames pass through the same
+	// sanitizer as global names (length cap, no smuggled whitespace).
+	display := rm.ApplyNick(u.UID, u.Name, user.SanitizeName(req.Nick))
 	m := rm.AddText(display, u.UID, text, parseMentions(text), req.Preview, req.ReplyTo)
 	writeJSON(w, http.StatusCreated, m)
 }
@@ -646,7 +686,7 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	text := strings.TrimSpace(req.Text)
+	text := clampRunes(strings.TrimSpace(req.Text), maxMessageRunes)
 	m, err := rm.EditMessage(u.UID, id, text, parseMentions(text))
 	if err != nil {
 		status := http.StatusForbidden
@@ -714,17 +754,14 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	name := sanitizeFileName(header.Filename)
-	ctype := header.Header.Get("Content-Type")
-	if ctype == "" {
-		ctype = "application/octet-stream"
-	}
+	ctype := sanitizeContentType(header.Header.Get("Content-Type"))
 
 	// An optional caption lets a file be sent together with a describing message
 	// as a single entry. Inline previews are opt-in, mirroring text messages.
-	caption := strings.TrimSpace(r.FormValue("text"))
+	caption := clampRunes(strings.TrimSpace(r.FormValue("text")), maxMessageRunes)
 	preview := r.FormValue("preview") == "1" || r.FormValue("preview") == "true"
 
-	display := rm.ApplyNick(u.UID, u.Name, r.FormValue("nick"))
+	display := rm.ApplyNick(u.UID, u.Name, user.SanitizeName(r.FormValue("nick")))
 	m := rm.AddFile(display, u.UID, name, ctype, data, caption, parseMentions(caption), preview, r.FormValue("replyTo"))
 	writeJSON(w, http.StatusCreated, m)
 }
@@ -754,6 +791,11 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// A served file is wholly user-controlled. Even with the inline whitelist
+	// below, give every download a deny-all, sandboxed CSP so that a payload
+	// that does get interpreted as a document (e.g. opened top-level) can never
+	// run script or reach this origin.
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 
 	// Media previews: when explicitly requested (?inline=1) and the declared
 	// content type is a whitelisted media type, serve the file inline with its
@@ -772,11 +814,16 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 
 // isInlineMedia reports whether a declared content type is safe to render
 // inline (image, video or audio). Combined with nosniff this is safe even
-// though the type is supplied by the uploader.
+// though the type is supplied by the uploader. SVG is explicitly excluded:
+// unlike raster images it is an active document type that can embed script,
+// so rendering an uploaded SVG inline at this origin would be stored XSS.
 func isInlineMedia(ctype string) bool {
 	ctype = strings.ToLower(strings.TrimSpace(ctype))
 	if i := strings.IndexByte(ctype, ';'); i >= 0 {
 		ctype = strings.TrimSpace(ctype[:i])
+	}
+	if strings.Contains(ctype, "svg") || strings.Contains(ctype, "xml") {
+		return false
 	}
 	return strings.HasPrefix(ctype, "image/") ||
 		strings.HasPrefix(ctype, "video/") ||

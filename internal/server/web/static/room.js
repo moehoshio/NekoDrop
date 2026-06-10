@@ -212,11 +212,13 @@
 
   function mediaKind(ctype, name) {
     const t = (ctype || "").toLowerCase();
-    if (t.indexOf("image/") === 0) return "image";
+    // SVG is excluded: the server refuses to serve it inline (it is an active
+    // document type that can embed script), so it is offered as a download.
+    if (t.indexOf("image/") === 0 && t.indexOf("svg") === -1) return "image";
     if (t.indexOf("video/") === 0) return "video";
     if (t.indexOf("audio/") === 0) return "audio";
     const ext = (name || "").toLowerCase().split(".").pop();
-    if (["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"].includes(ext)) return "image";
+    if (["png", "jpg", "jpeg", "gif", "webp", "bmp"].includes(ext)) return "image";
     if (["mp4", "webm", "ogg", "mov", "mkv"].includes(ext)) return "video";
     if (["mp3", "wav", "oga", "m4a", "flac"].includes(ext)) return "audio";
     return "";
