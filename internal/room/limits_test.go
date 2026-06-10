@@ -2,6 +2,7 @@ package room
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -126,4 +127,63 @@ func TestActiveAndOwnedChannelsSurviveReclaim(t *testing.T) {
 		t.Fatal("channel with a live subscriber must not be reclaimed")
 	}
 	_ = owned
+}
+
+// TestChannelTotalBytesAreBounded verifies the combined text+file byte budget:
+// once a channel's resident memory exceeds MaxBytesPerChannel the oldest
+// messages are evicted, text bytes included.
+func TestChannelTotalBytesAreBounded(t *testing.T) {
+	r := newRoom("test", "id1")
+	// Total budget of 4 KiB; each message carries 1 KiB of text.
+	r.applyLimits(Limits{
+		MaxMessagesPerChannel:    1000,
+		MaxFileBytesPerChannel:   1 << 20,
+		MaxBytesPerChannel:       4 * 1024,
+		MaxSubscribersPerChannel: 10,
+		MaxChannels:              10,
+	})
+
+	text := strings.Repeat("x", 1024)
+	for i := 0; i < 10; i++ {
+		r.AddText("alice", "100", strconv.Itoa(i)+text, nil, false, "")
+	}
+
+	r.mu.RLock()
+	total := r.textBytes + r.fileBytes
+	n := len(r.messages)
+	first := r.messages[0].Text
+	r.mu.RUnlock()
+	if total > 4*1024 {
+		t.Fatalf("resident bytes = %d, want <= 4096", total)
+	}
+	if n >= 10 {
+		t.Fatalf("messages resident = %d, want oldest evicted", n)
+	}
+	if first[0] == '0' {
+		t.Fatal("oldest message should have been evicted")
+	}
+
+	// File payloads count against the same budget.
+	r.AddFile("bob", "101", "big.bin", "application/octet-stream", make([]byte, 3*1024), "", nil, false, "")
+	r.mu.RLock()
+	total = r.textBytes + r.fileBytes
+	r.mu.RUnlock()
+	if total > 4*1024 {
+		t.Fatalf("resident bytes after file = %d, want <= 4096", total)
+	}
+}
+
+// TestEditKeepsTextBytesAccounted verifies edits adjust the byte ledger.
+func TestEditKeepsTextBytesAccounted(t *testing.T) {
+	r := newRoom("test", "id1")
+	m := r.AddText("alice", "100", "short", nil, false, "")
+	if _, err := r.EditMessage("100", m.ID, strings.Repeat("y", 500), nil); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	r.mu.RLock()
+	tb := r.textBytes
+	r.mu.RUnlock()
+	if tb != 500 {
+		t.Fatalf("textBytes = %d, want 500", tb)
+	}
 }

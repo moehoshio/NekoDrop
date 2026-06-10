@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -78,4 +79,53 @@ func contentDisposition(name string) string {
 // http.ServeContent.
 func newBytesReadSeeker(b []byte) io.ReadSeeker {
 	return bytes.NewReader(b)
+}
+
+// clampRunes truncates s to at most n runes.
+func clampRunes(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n])
+	}
+	return s
+}
+
+// sanitizeContentType validates an uploader-declared content type. Anything
+// over-long or containing characters that have no business in a MIME type
+// (control characters could corrupt response headers) falls back to a plain
+// binary type.
+func sanitizeContentType(ctype string) string {
+	ctype = strings.TrimSpace(ctype)
+	if ctype == "" || len(ctype) > 255 {
+		return "application/octet-stream"
+	}
+	for _, r := range ctype {
+		if r <= ' ' && r != ' ' || r >= 0x7f {
+			return "application/octet-stream"
+		}
+	}
+	return ctype
+}
+
+// sameOriginRequest reports whether a state-changing request plausibly comes
+// from this site itself. It is a CSRF defence layered on top of the SameSite
+// cookie attribute: browsers attach a Sec-Fetch-Site and/or Origin header to
+// cross-origin requests, and any request demonstrably sent by another origin
+// is rejected. Requests without these headers (non-browser clients, same-origin
+// navigations in older browsers) are allowed through.
+func sameOriginRequest(r *http.Request) bool {
+	switch r.Header.Get("Sec-Fetch-Site") {
+	case "", "same-origin", "none":
+		// fine
+	default: // "cross-site" or "same-site" (sibling subdomain)
+		return false
+	}
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	return strings.EqualFold(u.Host, r.Host)
 }

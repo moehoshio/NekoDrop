@@ -103,6 +103,7 @@ Because the default backend keeps everything in memory, NekoDrop enforces finite
 | ----------------------- | ------- | ------- | ------ |
 | `maxMessagesPerChannel` | `NEKODROP_MAX_MESSAGES` | `1000` | Recent messages kept per channel; older ones are evicted with their files |
 | `maxFileBytesPerChannel` | `NEKODROP_MAX_FILE_BYTES` | `134217728` (128 MiB) | In-memory uploaded-file bytes per channel |
+| `maxBytesPerChannel` | `NEKODROP_MAX_CHANNEL_BYTES` | `167772160` (160 MiB) | Total resident memory per channel (message text + file payloads); the oldest messages are evicted when exceeded |
 | `maxSubscribersPerChannel` | `NEKODROP_MAX_SUBSCRIBERS` | `512` | Concurrent live connections per channel |
 | `maxChannels` | `NEKODROP_MAX_LIVE_CHANNELS` | `10000` | Live channels; idle ownerless channels are reclaimed to make room |
 | `maxUsers` | `NEKODROP_MAX_USERS` | `100000` | Identities retained in memory; oldest unnamed ones are evicted |
