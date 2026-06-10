@@ -186,6 +186,11 @@ type Limits struct {
 	// MaxFileBytesPerChannel caps the total bytes of uploaded file payloads
 	// held in memory for a single channel.
 	MaxFileBytesPerChannel int64
+	// MaxBytesPerChannel caps a channel's total resident memory: message text
+	// plus uploaded file payloads. When the budget is exceeded the oldest
+	// resident messages are evicted (freeing any file payloads they own) until
+	// the channel fits again.
+	MaxBytesPerChannel int64
 	// MaxSubscribersPerChannel caps concurrent live (SSE) connections to one
 	// channel.
 	MaxSubscribersPerChannel int
@@ -201,6 +206,7 @@ const maxAnnouncements = 200
 var DefaultLimits = Limits{
 	MaxMessagesPerChannel:    1000,
 	MaxFileBytesPerChannel:   128 << 20, // 128 MiB
+	MaxBytesPerChannel:       160 << 20, // 160 MiB: file budget + headroom for text
 	MaxSubscribersPerChannel: 512,
 	MaxChannels:              10000,
 }
@@ -212,6 +218,9 @@ func (l Limits) withDefaults() Limits {
 	}
 	if out.MaxFileBytesPerChannel <= 0 {
 		out.MaxFileBytesPerChannel = DefaultLimits.MaxFileBytesPerChannel
+	}
+	if out.MaxBytesPerChannel <= 0 {
+		out.MaxBytesPerChannel = DefaultLimits.MaxBytesPerChannel
 	}
 	if out.MaxSubscribersPerChannel <= 0 {
 		out.MaxSubscribersPerChannel = DefaultLimits.MaxSubscribersPerChannel
@@ -243,6 +252,7 @@ type Room struct {
 	files         map[string]*File
 	announcements []Announcement
 	fileBytes     int64 // total bytes of file payloads currently in memory
+	textBytes     int64 // total bytes of resident message text
 
 	online      map[string]int // uid -> active connection count
 	subscribers map[chan Event]struct{}
@@ -250,6 +260,7 @@ type Room struct {
 	// Per-channel memory bounds.
 	maxMessages    int
 	maxFileBytes   int64
+	maxTotalBytes  int64 // text + file bytes combined
 	maxSubscribers int
 
 	lastActive time.Time
@@ -275,6 +286,7 @@ func newRoom(key, id string) *Room {
 		subscribers:    make(map[chan Event]struct{}),
 		maxMessages:    DefaultLimits.MaxMessagesPerChannel,
 		maxFileBytes:   DefaultLimits.MaxFileBytesPerChannel,
+		maxTotalBytes:  DefaultLimits.MaxBytesPerChannel,
 		maxSubscribers: DefaultLimits.MaxSubscribersPerChannel,
 		lastActive:     time.Now(),
 		store:          storage.NewMemory(),
@@ -286,14 +298,19 @@ func newRoom(key, id string) *Room {
 func (r *Room) applyLimits(l Limits) {
 	r.maxMessages = l.MaxMessagesPerChannel
 	r.maxFileBytes = l.MaxFileBytesPerChannel
+	r.maxTotalBytes = l.MaxBytesPerChannel
 	r.maxSubscribers = l.MaxSubscribersPerChannel
 }
 
 // trimLocked enforces the per-channel memory bounds, evicting the oldest
-// messages (and freeing any file payloads they own) until both the file-byte
-// budget and the message-count cap are satisfied. The caller holds r.mu.
+// messages (and freeing any file payloads they own) until the file-byte
+// budget, the total memory budget and the message-count cap are all
+// satisfied. The caller holds r.mu.
 func (r *Room) trimLocked() {
 	for r.maxFileBytes > 0 && r.fileBytes > r.maxFileBytes && len(r.messages) > 1 {
+		r.evictOldestLocked()
+	}
+	for r.maxTotalBytes > 0 && r.textBytes+r.fileBytes > r.maxTotalBytes && len(r.messages) > 1 {
 		r.evictOldestLocked()
 	}
 	if r.maxMessages > 0 && len(r.messages) > r.maxMessages {
@@ -314,6 +331,7 @@ func (r *Room) evictOldestLocked() {
 	// Advance the slice header; the backing array is reclaimed on the next
 	// append-triggered reallocation, bounding memory to ~2x the cap.
 	r.messages = r.messages[1:]
+	r.textBytes -= int64(len(old.Text))
 	if old.Kind == KindFile && old.FileID != "" {
 		if f, ok := r.files[old.FileID]; ok {
 			r.fileBytes -= int64(len(f.Data))
@@ -678,6 +696,7 @@ func (r *Room) AddText(sender, senderUID, text string, mentions []string, previe
 	}
 	r.mu.Lock()
 	r.messages = append(r.messages, m)
+	r.textBytes += int64(len(m.Text))
 	r.rememberSenderName(senderUID, sender)
 	r.lastActive = time.Now()
 	r.trimLocked()
@@ -713,6 +732,7 @@ func (r *Room) AddFile(sender, senderUID, name, contentType string, data []byte,
 	r.files[f.ID] = f
 	r.fileBytes += f.Size()
 	r.messages = append(r.messages, m)
+	r.textBytes += int64(len(m.Text))
 	r.rememberSenderName(senderUID, sender)
 	r.lastActive = time.Now()
 	r.trimLocked()
@@ -777,11 +797,13 @@ func (r *Room) EditMessage(actorUID, id, text string, mentions []string) (Messag
 		r.mu.Unlock()
 		return Message{}, errors.New("message text is required")
 	}
+	r.textBytes += int64(len(text)) - int64(len(m.Text))
 	m.Text = text
 	m.Mentions = mentions
 	m.Edited = true
 	r.messages[idx] = m
 	r.lastActive = time.Now()
+	r.trimLocked()
 	r.mu.Unlock()
 	if r.store != nil {
 		_ = r.store.AppendMessage(r.messageRecord(m))
@@ -874,6 +896,7 @@ func (r *Room) PurgeMessagesBy(actorUID, targetUID string) (int, error) {
 func (r *Room) removeMessageAtLocked(i int) {
 	m := r.messages[i]
 	r.messages = append(r.messages[:i], r.messages[i+1:]...)
+	r.textBytes -= int64(len(m.Text))
 	if m.Kind == KindFile && m.FileID != "" {
 		if f, ok := r.files[m.FileID]; ok {
 			r.fileBytes -= int64(len(f.Data))
@@ -1310,7 +1333,14 @@ func (h *Hub) restore() {
 					FileID: m.FileID, FileName: m.FileName, FileSize: m.FileSize, FileType: m.FileType,
 					Edited: m.Edited, Time: m.Time,
 				})
+				r.textBytes += int64(len(m.Text))
 			}
+			// Re-apply the byte budgets: a large on-disk history must not blow
+			// the in-memory budget on restart. (The room is not yet shared, so
+			// holding the lock is not required, but trimLocked's contract is.)
+			r.mu.Lock()
+			r.trimLocked()
+			r.mu.Unlock()
 		}
 		if anns, err := h.store.LoadAnnouncements(c.ID); err == nil {
 			if len(anns) > maxAnnouncements {

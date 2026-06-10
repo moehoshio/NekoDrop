@@ -10,6 +10,7 @@
   "limits": {
     "maxMessagesPerChannel": 1000,
     "maxFileBytesPerChannel": 134217728,
+    "maxBytesPerChannel": 167772160,
     "maxSubscribersPerChannel": 512,
     "maxChannels": 10000,
     "maxUsers": 100000

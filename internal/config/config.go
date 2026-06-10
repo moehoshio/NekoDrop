@@ -24,6 +24,9 @@ type Limits struct {
 	MaxMessagesPerChannel int `json:"maxMessagesPerChannel"`
 	// MaxFileBytesPerChannel caps in-memory uploaded-file bytes per channel.
 	MaxFileBytesPerChannel int64 `json:"maxFileBytesPerChannel"`
+	// MaxBytesPerChannel caps a channel's total resident memory (message text
+	// plus file payloads); the oldest messages are evicted when it is hit.
+	MaxBytesPerChannel int64 `json:"maxBytesPerChannel"`
 	// MaxSubscribersPerChannel caps concurrent live connections per channel.
 	MaxSubscribersPerChannel int `json:"maxSubscribersPerChannel"`
 	// MaxChannels caps the number of simultaneously live channels.
@@ -132,6 +135,11 @@ func (c *Config) ApplyEnv() {
 	if v := os.Getenv("NEKODROP_MAX_FILE_BYTES"); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			c.Limits.MaxFileBytesPerChannel = n
+		}
+	}
+	if v := os.Getenv("NEKODROP_MAX_CHANNEL_BYTES"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			c.Limits.MaxBytesPerChannel = n
 		}
 	}
 	if v := os.Getenv("NEKODROP_MAX_SUBSCRIBERS"); v != "" {

@@ -77,6 +77,7 @@ func main() {
 		Limits: room.Limits{
 			MaxMessagesPerChannel:    cfg.Limits.MaxMessagesPerChannel,
 			MaxFileBytesPerChannel:   cfg.Limits.MaxFileBytesPerChannel,
+			MaxBytesPerChannel:       cfg.Limits.MaxBytesPerChannel,
 			MaxSubscribersPerChannel: cfg.Limits.MaxSubscribersPerChannel,
 			MaxChannels:              cfg.Limits.MaxChannels,
 		},

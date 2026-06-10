@@ -32,8 +32,10 @@ const cookieName = "nekodrop_token"
 
 // maxMessageRunes caps the length of a message text or file caption. Without a
 // cap a single request (bounded only by the 1 MiB JSON body limit) could pin a
-// megabyte of text per message in every channel's resident history.
-const maxMessageRunes = 4096
+// megabyte of text per message in every channel's resident history. Long-form
+// pastes fit comfortably; the per-channel byte budget (room.Limits.
+// MaxBytesPerChannel) bounds the aggregate.
+const maxMessageRunes = 16384
 
 // maxAnnouncementRunes caps the length of an announcement.
 const maxAnnouncementRunes = 1000
