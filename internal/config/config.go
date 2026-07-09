@@ -35,6 +35,21 @@ type Limits struct {
 	MaxUsers int `json:"maxUsers"`
 }
 
+// Admin configures the built-in administrator panel. The panel is disabled by
+// default; enabling it additionally requires a non-empty access token, so a
+// bare `"enabled": true` can never expose an unauthenticated panel.
+type Admin struct {
+	// Enabled turns the admin panel (and its API) on. Default false.
+	Enabled bool `json:"enabled"`
+	// Token is the secret an administrator must present to use the panel.
+	// The panel stays disabled while the token is empty.
+	Token string `json:"token"`
+}
+
+// Active reports whether the admin panel should actually be served: it must be
+// explicitly enabled and have a non-empty token.
+func (a Admin) Active() bool { return a.Enabled && a.Token != "" }
+
 // Storage configures the durable persistence backend.
 type Storage struct {
 	// Backend is one of "memory" (default), "sqlite" or "mysql".
@@ -60,6 +75,8 @@ type Config struct {
 	Storage Storage `json:"storage"`
 	// Limits bound in-memory resource usage.
 	Limits Limits `json:"limits"`
+	// Admin configures the administrator panel (disabled by default).
+	Admin Admin `json:"admin"`
 }
 
 // Default returns the configuration used when nothing is specified.
@@ -156,6 +173,14 @@ func (c *Config) ApplyEnv() {
 		if n, err := strconv.Atoi(v); err == nil {
 			c.Limits.MaxUsers = n
 		}
+	}
+	if v := os.Getenv("NEKODROP_ADMIN_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			c.Admin.Enabled = b
+		}
+	}
+	if v := os.Getenv("NEKODROP_ADMIN_TOKEN"); v != "" {
+		c.Admin.Token = v
 	}
 	c.normalize()
 }

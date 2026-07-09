@@ -146,6 +146,119 @@
     }
   });
 
+  // --- Account migration ---
+  // Off by default, per user: enabling mints a persistent migration code that
+  // another browser can enter to inherit this account. The status is loaded
+  // lazily when the section is first opened.
+  const migrateBox = document.getElementById("migrate-box");
+  const migrateStatus = document.getElementById("migrate-status");
+  const migrateCodeRow = document.getElementById("migrate-code-row");
+  const migrateCode = document.getElementById("migrate-code");
+  const migrateCopy = document.getElementById("migrate-copy");
+  const migrateEnable = document.getElementById("migrate-enable");
+  const migrateRegen = document.getElementById("migrate-regen");
+  const migrateDisable = document.getElementById("migrate-disable");
+  const migrateForm = document.getElementById("migrate-form");
+  const migrateInput = document.getElementById("migrate-input");
+  const migrateError = document.getElementById("migrate-error");
+  const migrateDone = document.getElementById("migrate-done");
+
+  let migration = null; // {enabled, code} once loaded
+
+  function renderMigration() {
+    if (!migration) return;
+    migrateStatus.hidden = false;
+    migrateStatus.textContent = migration.enabled
+      ? t("landing.migrate_status_on")
+      : t("landing.migrate_status_off");
+    migrateCodeRow.hidden = !migration.enabled;
+    migrateCode.value = migration.code || "";
+    migrateEnable.hidden = migration.enabled;
+    migrateRegen.hidden = !migration.enabled;
+    migrateDisable.hidden = !migration.enabled;
+  }
+
+  async function loadMigration() {
+    try {
+      const res = await fetch("/api/me/migration");
+      if (res.ok) {
+        migration = await res.json();
+        renderMigration();
+      }
+    } catch (e) {
+      /* best effort */
+    }
+  }
+
+  migrateBox.addEventListener("toggle", function () {
+    if (migrateBox.open && migration === null) loadMigration();
+  });
+
+  async function setMigration(method) {
+    try {
+      const res = await fetch("/api/me/migration", { method: method });
+      if (res.ok) {
+        migration = await res.json();
+        renderMigration();
+      }
+    } catch (e) {
+      /* best effort */
+    }
+  }
+
+  migrateEnable.addEventListener("click", () => setMigration("POST"));
+  migrateRegen.addEventListener("click", () => setMigration("POST"));
+  migrateDisable.addEventListener("click", () => setMigration("DELETE"));
+
+  migrateCopy.addEventListener("click", async function () {
+    migrateCode.select();
+    try {
+      await navigator.clipboard.writeText(migrateCode.value);
+      migrateCopy.textContent = t("landing.migrate_copied");
+      setTimeout(() => { migrateCopy.textContent = t("landing.migrate_copy"); }, 1500);
+    } catch (e) {
+      document.execCommand("copy"); // fallback for insecure contexts
+    }
+  });
+
+  migrateForm.addEventListener("submit", async function (e) {
+    e.preventDefault();
+    migrateError.hidden = true;
+    migrateDone.hidden = true;
+    const code = migrateInput.value.trim();
+    if (!code) return;
+    if (!window.confirm(t("landing.migrate_confirm"))) return;
+    try {
+      const res = await fetch("/api/migrate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: code }),
+      });
+      if (!res.ok) {
+        migrateError.textContent = res.status === 404
+          ? t("landing.migrate_bad_code")
+          : (await res.text()).trim() || t("landing.net_err");
+        migrateError.hidden = false;
+        return;
+      }
+      me = await res.json();
+      renderMe();
+      // Sync the name box to the adopted account so a later join/create does
+      // not silently rename it to this browser's previously saved name.
+      nameInput.value = me.named ? me.name : "";
+      saveName();
+      migrateInput.value = "";
+      migration = null; // the adopted account's own status; reload lazily
+      if (migrateBox.open) await loadMigration();
+      migrateDone.textContent = t("landing.migrate_done", { name: me.name + "#" + me.uid });
+      migrateDone.hidden = false;
+      loadChannels(); // "your/joined channels" now reflect the adopted account
+    } catch (err) {
+      migrateError.textContent = t("landing.net_err");
+      migrateError.hidden = false;
+    }
+  });
+
   // --- Public directory ---
   function channelEntry(c) {
     const li = document.createElement("li");
@@ -252,6 +365,7 @@
   // Re-render language-dependent dynamic text when the language changes.
   document.addEventListener("nekodrop:langchange", function () {
     renderMe();
+    renderMigration();
     channelList.dataset.sig = "";
     mineList.dataset.sig = "";
     joinedList.dataset.sig = "";

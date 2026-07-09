@@ -49,6 +49,8 @@ Then open <http://localhost:8080> in your browser, enter a room code (or generat
 - **Light & dark themes** — auto, dark or light, switchable from a 🌓 picker. *Auto* follows the operating system's colour scheme and updates live; the choice is remembered in a cookie.
 - **Paste & drop attachments** — paste an image from the clipboard or drop files onto the chat; click a staged file to preview its contents or info, and remove it, before sending.
 - **Files with a caption** — type a message while a file is staged and the two are sent as a single message describing the file; or send the file on its own.
+- **Account migration** — off by default, per user: opt in to get a persistent migration code, then enter it in another browser to inherit the same account there (see [Account migration](#account-migration)).
+- **Admin panel** — an operator backend at `/admin`, disabled by default: disable channels, ban users site-wide, grant per-channel/per-user upload-size exemptions, and edit the runtime configuration online (see [Admin panel](#admin-panel)).
 - **Pluggable storage** — keep everything in memory (default) or persist to SQLite or MySQL so channels and history survive restarts.
 - **Configurable** — a JSON config file plus environment variables and flags control the listen address, limits and storage.
 
@@ -66,6 +68,8 @@ Settings are resolved from a **JSON config file**, then **environment variables*
 | `-max-channels-per-user` | `NEKODROP_MAX_CHANNELS` | `maxChannelsPerUser` | `5` | Channels a single user may own at once (`0` = unlimited) |
 | `-storage` | `NEKODROP_STORAGE_BACKEND` | `storage.backend` | `memory` | Storage backend: `memory`, `sqlite`, or `mysql` |
 | `-storage-dsn` | `NEKODROP_STORAGE_DSN` | `storage.dsn` | — | Backend DSN (see below) |
+| — | `NEKODROP_ADMIN_ENABLED` | `admin.enabled` | `false` | Turn on the admin panel at `/admin` |
+| — | `NEKODROP_ADMIN_TOKEN` | `admin.token` | — | Admin access token (required for the panel to activate) |
 
 Example config file ([`config.example.json`](config.example.json)):
 
@@ -75,7 +79,8 @@ Example config file ([`config.example.json`](config.example.json)):
   "port": 8080,
   "maxUploadBytes": 33554432,
   "maxChannelsPerUser": 5,
-  "storage": { "backend": "sqlite", "dsn": "nekodrop.db" }
+  "storage": { "backend": "sqlite", "dsn": "nekodrop.db" },
+  "admin": { "enabled": false, "token": "" }
 }
 ```
 
@@ -109,6 +114,33 @@ Because the default backend keeps everything in memory, NekoDrop enforces finite
 | `maxUsers` | `NEKODROP_MAX_USERS` | `100000` | Identities retained in memory; oldest unnamed ones are evicted |
 
 With a persistent backend the full history still lives in the database; these limits only cap what is held resident in memory.
+
+### Admin panel
+
+A server-operator backend, **disabled by default**. Enable it in the config file (both keys are required — a bare `"enabled": true` without a token never exposes the panel):
+
+```json
+{ "admin": { "enabled": true, "token": "choose-a-long-random-secret" } }
+```
+
+Then open `/admin` and unlock it with the token (sent as an `X-Admin-Token` header on every request). While disabled, `/admin` and the whole admin API answer 404. The panel manages site-wide state layered on top of the per-channel owner/admin moderation model:
+
+- **Dashboard** — a self-refreshing statistics overview: live channels, known/named/migration-enabled users, people online and active connections, resident messages/files/announcements and their memory footprint, Go process memory (heap and OS), goroutines, uptime, and — on persistent backends — database size and stored totals.
+- **Availability** — disable (ban) whole channels or ban users site-wide. A disabled channel disappears from every listing and rejects reading, posting, joining and downloads; a banned user can still read but cannot post, upload, join, or create channels.
+- **Exemptions** — give an individual channel or user their own upload size limit, independent of the global one. A per-user limit wins over a per-channel one, which wins over the global configuration, so an exemption can either raise or tighten the effective limit.
+- **Runtime configuration** — edit the configuration knobs online (upload size, per-user channel quota, and every `limits.*` value). Changes apply immediately to the live server and are stored as overrides on top of the config file; clearing a field reverts to the file's value.
+
+Admin state (bans, exemptions, config overrides) persists through the storage backend, so it survives restarts with `sqlite`/`mysql`. Enforcement stays active even if the panel is later switched off — only the management UI/API is gated.
+
+### Account migration
+
+NekoDrop identities normally live in a single browser's cookie. Account migration lets a user carry one account across browsers or devices. It is **off by default for every user** and each user opts in individually:
+
+1. On the landing page, open *Account migration* and enable it. The server mints a persistent **migration code** bound to your account.
+2. In another browser, open the same section, paste the code, and confirm. That browser's identity cookie is re-bound to your account — same UID, name, channels and history.
+3. The code stays valid (so more browsers can follow) until you regenerate or disable migration, either of which invalidates the old code immediately.
+
+Treat the code like a password: anyone who has it can use the account. Codes are 256-bit random values, never shown to other users, and users with migration enabled are kept in memory in preference to plain anonymous visitors when the identity cap forces eviction.
 
 ---
 
@@ -154,8 +186,12 @@ The web UI is the primary interface, but the underlying HTTP API is straightforw
 | ------------- | ----------- |
 | `GET /` | Landing page (join, create, public directory) |
 | `GET /r/{room}` | Channel page |
-| `GET /api/me` | Current identity (`{uid,name,named}`); sets the cookie |
+| `GET /api/me` | Current identity (`{uid,name,named,migration}`); sets the cookie |
 | `POST /api/me` | Update display name (`{"name"}`); UID is unchanged |
+| `GET /api/me/migration` | Account-migration status for this identity (`{enabled,code}`) |
+| `POST /api/me/migration` | Enable migration / regenerate the code (invalidates the old one) |
+| `DELETE /api/me/migration` | Disable migration and invalidate the code |
+| `POST /api/migrate` | Adopt the account behind `{"code"}` on this browser (re-binds the cookie) |
 | `GET /api/channels` | Public directory (`channels`), your own channels (`mine`) and channels you have joined (`joined`) |
 | `POST /api/channels` | Create an owned channel (name, visibility, settings…) |
 | `GET /api/channels/{room}` | Channel metadata + your role (+ pending & member roster if admin) |
@@ -171,6 +207,19 @@ The web UI is the primary interface, but the underlying HTTP API is straightforw
 | `DELETE /api/messages/{room}/{id}` | Delete a message (your own, or any member's if you are an admin) |
 | `POST /api/files/{room}` | Upload a file (multipart `file`, `sender`, optional `nick`, `text` caption, `preview` and `replyTo`) |
 | `GET /api/files/{room}/{id}` | Download a shared file (`?inline=1` renders whitelisted media inline) |
+
+When the admin panel is enabled, these additional endpoints exist (all require the `X-Admin-Token` header; everything answers 404 while the panel is disabled):
+
+| Method & path | Description |
+| ------------- | ----------- |
+| `GET /admin` | Admin panel page |
+| `GET /api/admin/overview` | Dashboard statistics: channels, users, online/connections, messages, files, resident memory, process memory, uptime, database totals |
+| `GET /api/admin/channels` | All live channels (`?q=` filters), with ban state and upload exemption |
+| `PATCH /api/admin/channels/{id}` | Set `{"banned"}` and/or `{"maxUploadBytes"}` (`null` clears) for a channel |
+| `GET /api/admin/users` | Known users (`?q=` filters), with ban state and upload exemption |
+| `PATCH /api/admin/users/{uid}` | Set `{"banned"}` and/or `{"maxUploadBytes"}` (`null` clears) for a user |
+| `GET /api/admin/config` | Runtime configuration: base values, overrides, effective values |
+| `PATCH /api/admin/config` | Set runtime overrides (any config field; `null` reverts to the file value) |
 
 ## Releases
 

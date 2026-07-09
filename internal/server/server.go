@@ -56,15 +56,31 @@ type Options struct {
 	Limits room.Limits
 	// MaxUsers caps identities retained in memory (0 = default).
 	MaxUsers int
+	// AdminEnabled turns on the administrator panel at /admin. It additionally
+	// requires a non-empty AdminToken; both default to off.
+	AdminEnabled bool
+	// AdminToken is the secret an administrator presents to use the panel.
+	AdminToken string
 }
 
 // Server is the NekoDrop HTTP handler.
 type Server struct {
-	hub       *room.Hub
-	users     *user.Registry
-	mux       *http.ServeMux
-	static    fs.FS
-	maxUpload int64
+	hub    *room.Hub
+	users  *user.Registry
+	mux    *http.ServeMux
+	static fs.FS
+	store  storage.Store
+	admin  *adminPanel
+
+	// Base configuration as resolved from file/env/flags. The admin panel's
+	// runtime overrides layer on top of these (see admin.go).
+	baseMaxUpload          int64
+	baseMaxChannelsPerUser int
+	baseLimits             room.Limits
+	baseMaxUsers           int
+
+	// startTime anchors the uptime figure on the admin dashboard.
+	startTime time.Time
 }
 
 // New constructs a Server with the given options.
@@ -83,12 +99,20 @@ func New(opts Options) (*Server, error) {
 	}
 
 	s := &Server{
-		hub:       room.NewHubWithStore(opts.MaxChannelsPerUser, store, opts.Limits),
-		users:     user.NewRegistryWithStore(store, opts.MaxUsers),
-		mux:       http.NewServeMux(),
-		static:    static,
-		maxUpload: maxUpload,
+		hub:                    room.NewHubWithStore(opts.MaxChannelsPerUser, store, opts.Limits),
+		users:                  user.NewRegistryWithStore(store, opts.MaxUsers),
+		mux:                    http.NewServeMux(),
+		static:                 static,
+		store:                  store,
+		admin:                  newAdminPanel(opts.AdminEnabled, opts.AdminToken, store),
+		baseMaxUpload:          maxUpload,
+		baseMaxChannelsPerUser: opts.MaxChannelsPerUser,
+		baseLimits:             opts.Limits,
+		baseMaxUsers:           opts.MaxUsers,
+		startTime:              time.Now(),
 	}
+	// Re-apply any persisted runtime overrides from a previous run.
+	s.applyRuntimeConfig()
 	s.routes()
 	return s, nil
 }
@@ -131,6 +155,22 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/me", s.handleMe)
 	s.mux.HandleFunc("POST /api/me", s.handleRename)
 
+	// Account migration (per-user opt-in, off by default).
+	s.mux.HandleFunc("GET /api/me/migration", s.handleMigrationStatus)
+	s.mux.HandleFunc("POST /api/me/migration", s.handleMigrationEnable)
+	s.mux.HandleFunc("DELETE /api/me/migration", s.handleMigrationDisable)
+	s.mux.HandleFunc("POST /api/migrate", s.handleMigrate)
+
+	// Admin panel (served only when enabled in the configuration).
+	s.mux.HandleFunc("GET /admin", s.handleAdminPage)
+	s.mux.HandleFunc("GET /api/admin/overview", s.handleAdminOverview)
+	s.mux.HandleFunc("GET /api/admin/channels", s.handleAdminChannels)
+	s.mux.HandleFunc("PATCH /api/admin/channels/{id}", s.handleAdminPatchChannel)
+	s.mux.HandleFunc("GET /api/admin/users", s.handleAdminUsers)
+	s.mux.HandleFunc("PATCH /api/admin/users/{uid}", s.handleAdminPatchUser)
+	s.mux.HandleFunc("GET /api/admin/config", s.handleAdminGetConfig)
+	s.mux.HandleFunc("PATCH /api/admin/config", s.handleAdminPatchConfig)
+
 	// Channel directory & lifecycle.
 	s.mux.HandleFunc("GET /api/channels", s.handleChannelList)
 	s.mux.HandleFunc("POST /api/channels", s.handleCreateChannel)
@@ -162,9 +202,15 @@ func (s *Server) currentUser(w http.ResponseWriter, r *http.Request) *user.User 
 		}
 	}
 	u := s.users.Create("")
+	s.setIdentityCookie(w, r, u.Token)
+	return u
+}
+
+// setIdentityCookie binds the browser to the identity behind token.
+func (s *Server) setIdentityCookie(w http.ResponseWriter, r *http.Request, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     cookieName,
-		Value:    u.Token,
+		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
 		// Mark the identity cookie Secure whenever the request arrived over
@@ -174,7 +220,18 @@ func (s *Server) currentUser(w http.ResponseWriter, r *http.Request) *user.User 
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   60 * 60 * 24 * 365,
 	})
-	return u
+}
+
+// cookieUID returns the UID of the visitor's existing identity without minting
+// a new one. Used where the identity is only needed for a policy lookup before
+// the request body is consumed (e.g. resolving the upload size limit).
+func (s *Server) cookieUID(r *http.Request) string {
+	if c, err := r.Cookie(cookieName); err == nil {
+		if u := s.users.Get(c.Value); u != nil {
+			return u.UID
+		}
+	}
+	return ""
 }
 
 // resolveSender returns the current user, applying an optional display-name
@@ -189,8 +246,19 @@ func (s *Server) resolveSender(w http.ResponseWriter, r *http.Request, name stri
 	return u
 }
 
+// meJSON is the identity payload returned by the /api/me endpoints. It exposes
+// whether account migration is enabled but never the codes themselves.
+func (s *Server) meJSON(u *user.User) map[string]any {
+	return map[string]any{
+		"uid":       u.UID,
+		"name":      u.Name,
+		"named":     u.Named,
+		"migration": s.users.MigrationCode(u.Token) != "",
+	}
+}
+
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.currentUser(w, r))
+	writeJSON(w, http.StatusOK, s.meJSON(s.currentUser(w, r)))
 }
 
 func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
@@ -202,7 +270,55 @@ func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := s.resolveSender(w, r, req.Name)
-	writeJSON(w, http.StatusOK, u)
+	writeJSON(w, http.StatusOK, s.meJSON(u))
+}
+
+// --- Account migration ---
+//
+// Migration lets a user carry their identity to another browser: they opt in
+// (off by default) to mint a persistent migration code, then enter that code
+// in the other browser, whose identity cookie is re-bound to this account.
+
+func (s *Server) handleMigrationStatus(w http.ResponseWriter, r *http.Request) {
+	u := s.currentUser(w, r)
+	code := s.users.MigrationCode(u.Token)
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": code != "", "code": code})
+}
+
+func (s *Server) handleMigrationEnable(w http.ResponseWriter, r *http.Request) {
+	u := s.currentUser(w, r)
+	code, ok := s.users.EnableMigration(u.Token)
+	if !ok {
+		http.Error(w, "unknown identity", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": true, "code": code})
+}
+
+func (s *Server) handleMigrationDisable(w http.ResponseWriter, r *http.Request) {
+	u := s.currentUser(w, r)
+	s.users.DisableMigration(u.Token)
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": false, "code": ""})
+}
+
+// handleMigrate adopts the account behind a migration code on this browser:
+// the identity cookie is replaced with the target account's token. The
+// previous identity of this browser (if any) is simply left behind.
+func (s *Server) handleMigrate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	target := s.users.ByMigrationCode(strings.TrimSpace(req.Code))
+	if target == nil {
+		http.Error(w, "unknown migration code", http.StatusNotFound)
+		return
+	}
+	s.setIdentityCookie(w, r, target.Token)
+	writeJSON(w, http.StatusOK, s.meJSON(target))
 }
 
 // --- Static pages ---
@@ -255,14 +371,30 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, name, ctype s
 func (s *Server) handleChannelList(w http.ResponseWriter, r *http.Request) {
 	u := s.currentUser(w, r) // ensure the visitor has an identity cookie
 	writeJSON(w, http.StatusOK, map[string]any{
-		"channels": s.hub.PublicList(),
-		"mine":     s.hub.OwnedBy(u.UID),
-		"joined":   s.hub.JoinedBy(u.UID),
+		"channels": s.withoutBannedChannels(s.hub.PublicList()),
+		"mine":     s.withoutBannedChannels(s.hub.OwnedBy(u.UID)),
+		"joined":   s.withoutBannedChannels(s.hub.JoinedBy(u.UID)),
 	})
+}
+
+// withoutBannedChannels drops channels an administrator has disabled from a
+// user-facing listing.
+func (s *Server) withoutBannedChannels(in []room.Info) []room.Info {
+	out := in[:0]
+	for _, info := range in {
+		if !s.admin.channelBanned(info.ID) {
+			out = append(out, info)
+		}
+	}
+	return out
 }
 
 func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 	u := s.currentUser(w, r)
+	if s.admin.userBanned(u.UID) {
+		http.Error(w, bannedUserMsg, http.StatusForbidden)
+		return
+	}
 
 	var req struct {
 		Key             string `json:"key"`
@@ -325,12 +457,14 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 }
 
 // channelView is the payload returned for a single channel: its metadata, the
-// viewer's role, and (for admins) any pending join requests.
+// viewer's role, and (for admins) any pending join requests. Disabled reports
+// that a server administrator has taken the channel out of service.
 type channelView struct {
-	Channel room.Info            `json:"channel"`
-	Role    room.Role            `json:"role"`
-	Pending []room.PendingMember `json:"pending,omitempty"`
-	Members []room.Member        `json:"members,omitempty"`
+	Channel  room.Info            `json:"channel"`
+	Role     room.Role            `json:"role"`
+	Disabled bool                 `json:"disabled,omitempty"`
+	Pending  []room.PendingMember `json:"pending,omitempty"`
+	Members  []room.Member        `json:"members,omitempty"`
 }
 
 func (s *Server) handleChannelInfo(w http.ResponseWriter, r *http.Request) {
@@ -352,6 +486,12 @@ func (s *Server) handleChannelInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view := channelView{Channel: rm.Info(), Role: rm.RoleOf(u.UID)}
+	if s.admin.channelBanned(view.Channel.ID) {
+		// Disabled channels expose only their identity, not roster or requests.
+		view.Disabled = true
+		writeJSON(w, http.StatusOK, view)
+		return
+	}
 	if rm.IsAdmin(u.UID) {
 		view.Pending = rm.Pending()
 		view.Members = rm.Members()
@@ -425,6 +565,10 @@ func (s *Server) handleDissolveChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := s.currentUser(w, r)
+	if rm, ok := s.hub.Lookup(key); ok && s.admin.channelBanned(rm.ID) {
+		http.Error(w, bannedChannelMsg, http.StatusForbidden)
+		return
+	}
 	if err := s.hub.Dissolve(key, u.UID); err != nil {
 		status := http.StatusForbidden
 		if err == room.ErrChannelNotFound {
@@ -443,7 +587,15 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := s.currentUser(w, r)
+	if s.admin.userBanned(u.UID) {
+		http.Error(w, bannedUserMsg, http.StatusForbidden)
+		return
+	}
 	rm := s.hub.Room(key)
+	if s.admin.channelBanned(rm.ID) {
+		http.Error(w, bannedChannelMsg, http.StatusForbidden)
+		return
+	}
 	pending, err := rm.Join(u.UID, u.Name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusForbidden)
@@ -526,7 +678,9 @@ func (s *Server) handleAnnounce(w http.ResponseWriter, r *http.Request) {
 
 // lookupForAction resolves the channel for a moderation/settings action. It
 // requires the channel to already exist and writes an error response when it
-// does not. Authorization is enforced by the called Room method.
+// does not. Site-wide administrator bans (of the channel or the acting user)
+// are rejected here, since every caller is a state-changing action;
+// channel-level authorization is enforced by the called Room method.
 func (s *Server) lookupForAction(w http.ResponseWriter, r *http.Request) (*room.Room, *user.User, bool) {
 	key := NormalizeKey(r.PathValue("room"))
 	if key == "" {
@@ -538,7 +692,16 @@ func (s *Server) lookupForAction(w http.ResponseWriter, r *http.Request) (*room.
 		http.Error(w, "channel not found", http.StatusNotFound)
 		return nil, nil, false
 	}
-	return rm, s.currentUser(w, r), true
+	if s.admin.channelBanned(rm.ID) {
+		http.Error(w, bannedChannelMsg, http.StatusForbidden)
+		return nil, nil, false
+	}
+	u := s.currentUser(w, r)
+	if s.admin.userBanned(u.UID) {
+		http.Error(w, bannedUserMsg, http.StatusForbidden)
+		return nil, nil, false
+	}
+	return rm, u, true
 }
 
 // --- Messaging & files ---
@@ -558,6 +721,10 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	}
 	u := s.currentUser(w, r)
 	rm := s.hub.Room(key)
+	if s.admin.channelBanned(rm.ID) {
+		http.Error(w, bannedChannelMsg, http.StatusForbidden)
+		return
+	}
 	if !rm.CanRead(u.UID) {
 		http.Error(w, "this channel is private; join to view it", http.StatusForbidden)
 		return
@@ -660,7 +827,15 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	text = clampRunes(text, maxMessageRunes)
 
 	u := s.resolveSender(w, r, req.Sender)
+	if s.admin.userBanned(u.UID) {
+		http.Error(w, bannedUserMsg, http.StatusForbidden)
+		return
+	}
 	rm := s.hub.Room(key)
+	if s.admin.channelBanned(rm.ID) {
+		http.Error(w, bannedChannelMsg, http.StatusForbidden)
+		return
+	}
 	if !rm.CanSpeak(u.UID) {
 		http.Error(w, speakDeniedReason(rm, u.UID), http.StatusForbidden)
 		return
@@ -725,13 +900,30 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, s.maxUpload+(1<<20))
-	if err := r.ParseMultipartForm(s.maxUpload + (1 << 20)); err != nil {
+	// Resolve the effective upload limit before touching the body: an
+	// administrator may have granted this user or channel an exemption from
+	// (or a tighter bound than) the configured limit.
+	channelID := ""
+	if existing, ok := s.hub.Lookup(key); ok {
+		if s.admin.channelBanned(existing.ID) {
+			http.Error(w, bannedChannelMsg, http.StatusForbidden)
+			return
+		}
+		channelID = existing.ID
+	}
+	maxUpload := s.admin.uploadLimit(s.baseMaxUpload, s.cookieUID(r), channelID)
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxUpload+(1<<20))
+	if err := r.ParseMultipartForm(maxUpload + (1 << 20)); err != nil {
 		http.Error(w, "file too large or malformed upload", http.StatusRequestEntityTooLarge)
 		return
 	}
 
 	u := s.resolveSender(w, r, r.FormValue("sender"))
+	if s.admin.userBanned(u.UID) {
+		http.Error(w, bannedUserMsg, http.StatusForbidden)
+		return
+	}
 	rm := s.hub.Room(key)
 	if !rm.CanSpeak(u.UID) {
 		http.Error(w, speakDeniedReason(rm, u.UID), http.StatusForbidden)
@@ -745,12 +937,12 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	data, err := io.ReadAll(io.LimitReader(file, s.maxUpload+1))
+	data, err := io.ReadAll(io.LimitReader(file, maxUpload+1))
 	if err != nil {
 		http.Error(w, "failed to read file", http.StatusInternalServerError)
 		return
 	}
-	if int64(len(data)) > s.maxUpload {
+	if int64(len(data)) > maxUpload {
 		http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
 		return
 	}
@@ -780,6 +972,10 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	rm, ok := s.hub.Lookup(key)
 	if !ok {
 		http.NotFound(w, r)
+		return
+	}
+	if s.admin.channelBanned(rm.ID) {
+		http.Error(w, bannedChannelMsg, http.StatusForbidden)
 		return
 	}
 	if !rm.CanRead(u.UID) {

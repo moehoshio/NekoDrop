@@ -36,6 +36,94 @@ func TestSQLiteUserRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSQLiteMigrateCodeRoundTrip(t *testing.T) {
+	st := newSQLite(t)
+	if err := st.SaveUser(User{Token: "tok", UID: "100", Name: "Alice", Named: true, MigrateCode: "code-1"}); err != nil {
+		t.Fatalf("save user: %v", err)
+	}
+	users, err := st.LoadUsers()
+	if err != nil || len(users) != 1 || users[0].MigrateCode != "code-1" {
+		t.Fatalf("migrate code not persisted: %+v err=%v", users, err)
+	}
+	// Disabling migration clears the code.
+	if err := st.SaveUser(User{Token: "tok", UID: "100", Name: "Alice", Named: true}); err != nil {
+		t.Fatalf("resave user: %v", err)
+	}
+	users, _ = st.LoadUsers()
+	if len(users) != 1 || users[0].MigrateCode != "" {
+		t.Fatalf("migrate code not cleared: %+v", users)
+	}
+}
+
+func TestSQLiteKVRoundTrip(t *testing.T) {
+	st := newSQLite(t)
+	if _, ok, err := st.LoadKV("admin_state"); err != nil || ok {
+		t.Fatalf("missing key: ok=%v err=%v", ok, err)
+	}
+	if err := st.SaveKV("admin_state", `{"a":1}`); err != nil {
+		t.Fatalf("save kv: %v", err)
+	}
+	if err := st.SaveKV("admin_state", `{"a":2}`); err != nil {
+		t.Fatalf("overwrite kv: %v", err)
+	}
+	v, ok, err := st.LoadKV("admin_state")
+	if err != nil || !ok || v != `{"a":2}` {
+		t.Fatalf("load kv = %q ok=%v err=%v", v, ok, err)
+	}
+}
+
+func TestSQLiteStats(t *testing.T) {
+	st := newSQLite(t)
+
+	stats, err := st.Stats()
+	if err != nil {
+		t.Fatalf("stats on empty db: %v", err)
+	}
+	if !stats.Persistent {
+		t.Fatal("sqlite stats must report Persistent")
+	}
+	if stats.Users != 0 || stats.Channels != 0 || stats.Messages != 0 || stats.Files != 0 || stats.FileBytes != 0 {
+		t.Fatalf("empty db stats = %+v, want zero counts", stats)
+	}
+
+	if err := st.SaveUser(User{Token: "tok", UID: "100", Name: "Alice", Named: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveChannel(Channel{ID: "c1", Key: "demo"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendMessage(Message{ID: "m1", ChannelID: "c1", Kind: "text", Text: "hello", Time: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveFile(File{ID: "f1", ChannelID: "c1", Name: "a.bin", Data: []byte("12345")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendAnnouncement(Announcement{ID: "a1", ChannelID: "c1", Text: "notice", Time: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err = st.Stats()
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if stats.Users != 1 || stats.Channels != 1 || stats.Messages != 1 || stats.Files != 1 || stats.Announcements != 1 {
+		t.Fatalf("counts = %+v, want one of each", stats)
+	}
+	if stats.FileBytes != 5 {
+		t.Fatalf("FileBytes = %d, want 5", stats.FileBytes)
+	}
+	if stats.SizeBytes <= 0 {
+		t.Fatalf("SizeBytes = %d, want > 0", stats.SizeBytes)
+	}
+}
+
+func TestMemoryStatsNotPersistent(t *testing.T) {
+	stats, err := NewMemory().Stats()
+	if err != nil || stats.Persistent {
+		t.Fatalf("memory stats = %+v err=%v, want non-persistent zeroes", stats, err)
+	}
+}
+
 func TestSQLiteChannelAndHistoryRoundTrip(t *testing.T) {
 	st := newSQLite(t)
 

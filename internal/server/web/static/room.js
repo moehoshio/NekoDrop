@@ -1428,6 +1428,14 @@
     bindNotifSettings();
     await loadMe();
     const view = await loadChannel();
+    if (view && view.disabled) {
+      // The channel has been taken out of service by the server administrator.
+      setStatus(false, t("room.disabled_status"));
+      showNotice(t("room.disabled_notice"));
+      els.empty.hidden = true;
+      els.composer.hidden = true;
+      return;
+    }
     if (view && view.role && !view.role.canRead) {
       // Private channel we cannot read yet: gate behind a join prompt.
       setStatus(false, t("room.private_status"));

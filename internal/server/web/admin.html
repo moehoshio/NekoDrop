@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NekoDrop · admin panel</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/theme.js"></script>
+</head>
+<body class="landing admin">
+  <main class="admin-wrap">
+    <section class="card">
+      <div class="card-head">
+        <h1 class="logo">🐱 NekoDrop <span class="admin-tag" data-i18n="admin.title">Admin panel</span></h1>
+        <div class="head-pickers">
+        <label class="theme-picker">
+          <span class="theme-icon" aria-hidden="true">🌓</span>
+          <span class="sr-only" data-i18n="theme.label">Theme</span>
+          <select class="theme-select" aria-label="Theme">
+            <option value="auto" data-i18n="theme.auto">Auto</option>
+            <option value="dark" data-i18n="theme.dark">Dark</option>
+            <option value="light" data-i18n="theme.light">Light</option>
+          </select>
+        </label>
+        <label class="lang-picker">
+          <span class="lang-icon" aria-hidden="true">🌐</span>
+          <span class="sr-only" data-i18n="lang.label">Language</span>
+          <select class="lang-select" aria-label="Language">
+            <option value="en">English</option>
+            <option value="zh">繁體中文</option>
+            <option value="zh-Hans">简体中文</option>
+            <option value="ja">日本語</option>
+            <option value="es">Español</option>
+            <option value="ru">Русский</option>
+          </select>
+        </label>
+        </div>
+      </div>
+
+      <form id="login-form" class="join-form" autocomplete="off">
+        <label for="admin-token" data-i18n="admin.login_hint">Enter the admin token from the server configuration.</label>
+        <input id="admin-token" type="password" data-i18n-placeholder="admin.token_ph" placeholder="Admin token" required>
+        <button type="submit" data-i18n="admin.login">Unlock</button>
+        <p id="login-error" class="form-error" hidden></p>
+      </form>
+
+      <div id="overview" hidden>
+        <div class="directory-head">
+          <h2 data-i18n="admin.overview">Overview</h2>
+          <button id="lock-btn" class="ghost-button" type="button" data-i18n="admin.logout">Lock</button>
+        </div>
+        <div id="overview-stats"></div>
+      </div>
+    </section>
+
+    <section id="config-card" class="card" hidden>
+      <div class="directory-head">
+        <h2 data-i18n="admin.config">Server configuration</h2>
+      </div>
+      <p class="hint" data-i18n="admin.config_hint">Leave a field empty to use the value from the config file. Changes apply immediately and persist in storage.</p>
+      <form id="config-form" class="create-form" autocomplete="off">
+        <div class="admin-config-grid" id="config-fields"></div>
+        <button type="submit" data-i18n="admin.save">Save configuration</button>
+        <p id="config-note" class="form-note" hidden></p>
+        <p id="config-error" class="form-error" hidden></p>
+      </form>
+    </section>
+
+    <section id="channels-card" class="card" hidden>
+      <div class="directory-head">
+        <h2 data-i18n="admin.channels">Channels</h2>
+        <span class="admin-tools">
+          <input id="channel-search" type="text" data-i18n-placeholder="admin.search_ph" placeholder="Search…">
+          <button id="channel-refresh" class="ghost-button" type="button" data-i18n="admin.refresh">Refresh</button>
+        </span>
+      </div>
+      <div class="admin-table-wrap">
+        <ul id="admin-channels" class="admin-list"></ul>
+      </div>
+    </section>
+
+    <section id="users-card" class="card" hidden>
+      <div class="directory-head">
+        <h2 data-i18n="admin.users">Users</h2>
+        <span class="admin-tools">
+          <input id="user-search" type="text" data-i18n-placeholder="admin.search_ph" placeholder="Search…">
+          <button id="user-refresh" class="ghost-button" type="button" data-i18n="admin.refresh">Refresh</button>
+        </span>
+      </div>
+      <div class="admin-table-wrap">
+        <ul id="admin-users" class="admin-list"></ul>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/i18n.js"></script>
+  <script src="/static/admin.js"></script>
+</body>
+</html>

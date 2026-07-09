@@ -22,12 +22,15 @@ import (
 	"time"
 )
 
-// User is the persisted form of a visitor identity.
+// User is the persisted form of a visitor identity. MigrateCode, when
+// non-empty, is the user's account-migration code: a second, user-managed
+// bearer secret that lets another browser adopt this identity.
 type User struct {
-	Token string
-	UID   string
-	Name  string
-	Named bool
+	Token       string
+	UID         string
+	Name        string
+	Named       bool
+	MigrateCode string
 }
 
 // Channel is the persisted form of a channel's definition and membership.
@@ -90,6 +93,23 @@ type Announcement struct {
 	Time       time.Time
 }
 
+// Stats are approximate persisted totals reported for the admin dashboard.
+// The no-op memory backend reports Persistent=false and zeroes.
+type Stats struct {
+	// Persistent reports whether the backend actually stores anything.
+	Persistent bool
+	// SizeBytes is the approximate on-disk size of the database (0 = unknown).
+	SizeBytes int64
+	// Row counts per record type.
+	Users         int
+	Channels      int
+	Messages      int
+	Files         int
+	Announcements int
+	// FileBytes is the total size of persisted file payloads.
+	FileBytes int64
+}
+
 // Store is the durable persistence contract. Implementations must be safe for
 // concurrent use. All Load* methods return the persisted records (or empty
 // slices for the no-op backend); all write methods are best-effort from the
@@ -123,6 +143,15 @@ type Store interface {
 	// Announcements.
 	LoadAnnouncements(channelID string) ([]Announcement, error)
 	AppendAnnouncement(Announcement) error
+
+	// Key-value settings. LoadKV reports whether the key exists; SaveKV
+	// overwrites any previous value. Used for small server-side state such as
+	// the admin panel's bans and runtime configuration overrides.
+	LoadKV(key string) (value string, ok bool, err error)
+	SaveKV(key, value string) error
+
+	// Stats reports approximate persisted totals for the admin dashboard.
+	Stats() (Stats, error)
 
 	// Close releases any underlying resources.
 	Close() error
@@ -168,4 +197,7 @@ func (*Memory) SaveFile(File) error                              { return nil }
 func (*Memory) DeleteFile(string) error                          { return nil }
 func (*Memory) LoadAnnouncements(string) ([]Announcement, error) { return nil, nil }
 func (*Memory) AppendAnnouncement(Announcement) error            { return nil }
+func (*Memory) LoadKV(string) (string, bool, error)              { return "", false, nil }
+func (*Memory) SaveKV(string, string) error                      { return nil }
+func (*Memory) Stats() (Stats, error)                            { return Stats{}, nil }
 func (*Memory) Close() error                                     { return nil }

@@ -14,6 +14,7 @@ package user
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,11 +42,17 @@ const DefaultMaxUsers = 100_000
 // cookie; UID is the short, public, stable identifier shown in the UI. Named
 // reports whether the visitor has deliberately chosen their current name (as
 // opposed to keeping the auto-assigned default).
+//
+// MigrateCode, when non-empty, is the user's account-migration code: a second
+// bearer secret, opt-in and off by default, that another browser can present
+// to adopt this identity (see Registry.ByMigrationCode). Like Token it is
+// never serialized to clients except through the dedicated migration API.
 type User struct {
-	Token string `json:"-"`
-	UID   string `json:"uid"`
-	Name  string `json:"name"`
-	Named bool   `json:"named"`
+	Token       string `json:"-"`
+	UID         string `json:"uid"`
+	Name        string `json:"name"`
+	Named       bool   `json:"named"`
+	MigrateCode string `json:"-"`
 }
 
 // Label returns the canonical "name#uid" rendering used throughout the UI.
@@ -57,7 +64,8 @@ func (u *User) Label() string { return u.Name + "#" + u.UID }
 type Registry struct {
 	mu       sync.RWMutex
 	byToken  map[string]*User
-	order    []string // tokens in insertion order, for eviction
+	byCode   map[string]*User // migration code -> user, for account migration
+	order    []string         // tokens in insertion order, for eviction
 	nextUID  int
 	maxUsers int
 	store    storage.Store
@@ -79,14 +87,18 @@ func NewRegistryWithStore(store storage.Store, maxUsers int) *Registry {
 	}
 	r := &Registry{
 		byToken:  make(map[string]*User),
+		byCode:   make(map[string]*User),
 		nextUID:  firstUID,
 		maxUsers: maxUsers,
 		store:    store,
 	}
 	if users, err := store.LoadUsers(); err == nil {
 		for _, su := range users {
-			u := &User{Token: su.Token, UID: su.UID, Name: su.Name, Named: su.Named}
+			u := &User{Token: su.Token, UID: su.UID, Name: su.Name, Named: su.Named, MigrateCode: su.MigrateCode}
 			r.byToken[u.Token] = u
+			if u.MigrateCode != "" {
+				r.byCode[u.MigrateCode] = u
+			}
 			r.order = append(r.order, u.Token)
 			if n, err := strconv.Atoi(u.UID); err == nil && n >= r.nextUID {
 				r.nextUID = n + 1
@@ -97,20 +109,23 @@ func NewRegistryWithStore(store storage.Store, maxUsers int) *Registry {
 }
 
 // evictLocked drops the oldest identity to stay within maxUsers, preferring
-// unnamed (anonymous) identities so that deliberately named users survive
-// longest. The caller holds the write lock.
-func (r *Registry) evictLocked() {
+// unnamed (anonymous) identities that never opted into account migration, so
+// that users who deliberately named themselves or set up a migration code
+// survive longest. It reports whether an identity was removed. The caller
+// holds the write lock.
+func (r *Registry) evictLocked() bool {
 	if r.maxUsers <= 0 || len(r.byToken) < r.maxUsers {
-		return
+		return false
 	}
-	// Prefer the oldest unnamed user; fall back to the oldest user overall.
+	// Prefer the oldest anonymous, non-migratable user; fall back to the oldest
+	// user overall.
 	victim := -1
 	for i, tok := range r.order {
 		u := r.byToken[tok]
 		if u == nil {
 			continue
 		}
-		if !u.Named {
+		if !u.Named && u.MigrateCode == "" {
 			victim = i
 			break
 		}
@@ -119,11 +134,31 @@ func (r *Registry) evictLocked() {
 		}
 	}
 	if victim == -1 {
-		return
+		return false
 	}
 	tok := r.order[victim]
 	r.order = append(r.order[:victim], r.order[victim+1:]...)
+	if u := r.byToken[tok]; u != nil && u.MigrateCode != "" {
+		delete(r.byCode, u.MigrateCode)
+	}
 	delete(r.byToken, tok)
+	return true
+}
+
+// SetMaxUsers changes the in-memory identity cap at runtime, evicting down to
+// the new bound immediately. A non-positive value restores the default.
+func (r *Registry) SetMaxUsers(n int) {
+	if n <= 0 {
+		n = DefaultMaxUsers
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.maxUsers = n
+	for len(r.byToken) > r.maxUsers {
+		if !r.evictLocked() {
+			break
+		}
+	}
 }
 
 // Get returns the user bound to token, or nil if the token is unknown.
@@ -177,11 +212,169 @@ func (r *Registry) Rename(token, name string) (*User, bool) {
 	return u, true
 }
 
+// --- Account migration ---
+//
+// Migration is opt-in and off by default for every user. Enabling it mints a
+// persistent migration code — a bearer secret separate from the cookie token —
+// that the user can enter in another browser to adopt (inherit) this identity
+// there. The code stays valid until the user disables migration or generates a
+// new one.
+
+// MigrationCode returns the migration code of the user bound to token, or ""
+// when migration is disabled or the token is unknown.
+func (r *Registry) MigrationCode(token string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if u := r.byToken[token]; u != nil {
+		return u.MigrateCode
+	}
+	return ""
+}
+
+// EnableMigration turns on account migration for the user bound to token,
+// minting a fresh migration code (invalidating any previous one). It returns
+// the new code, or ok=false when the token is unknown.
+func (r *Registry) EnableMigration(token string) (code string, ok bool) {
+	r.mu.Lock()
+	u := r.byToken[token]
+	if u == nil {
+		r.mu.Unlock()
+		return "", false
+	}
+	if u.MigrateCode != "" {
+		delete(r.byCode, u.MigrateCode)
+	}
+	code = newToken()
+	u.MigrateCode = code
+	r.byCode[code] = u
+	snapshot := *u
+	r.mu.Unlock()
+
+	r.persist(&snapshot)
+	return code, true
+}
+
+// DisableMigration turns off account migration for the user bound to token,
+// invalidating their migration code. It reports whether the token was known.
+func (r *Registry) DisableMigration(token string) bool {
+	r.mu.Lock()
+	u := r.byToken[token]
+	if u == nil {
+		r.mu.Unlock()
+		return false
+	}
+	if u.MigrateCode != "" {
+		delete(r.byCode, u.MigrateCode)
+		u.MigrateCode = ""
+	}
+	snapshot := *u
+	r.mu.Unlock()
+
+	r.persist(&snapshot)
+	return true
+}
+
+// ByMigrationCode returns the user whose migration code matches, or nil. The
+// caller typically re-binds its identity cookie to the returned user's token,
+// completing the migration.
+func (r *Registry) ByMigrationCode(code string) *User {
+	if code == "" {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.byCode[code]
+}
+
+// --- Administration ---
+
+// Len returns the number of identities currently held in memory.
+func (r *Registry) Len() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.byToken)
+}
+
+// Stats is an aggregate snapshot of the registry, for the admin dashboard.
+type Stats struct {
+	// Users is the number of identities held in memory.
+	Users int
+	// Named counts users who deliberately chose a display name.
+	Named int
+	// Migration counts users with account migration enabled.
+	Migration int
+}
+
+// Stats aggregates a snapshot over every resident identity.
+func (r *Registry) Stats() Stats {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	st := Stats{Users: len(r.byToken), Migration: len(r.byCode)}
+	for _, u := range r.byToken {
+		if u.Named {
+			st.Named++
+		}
+	}
+	return st
+}
+
+// ByUID returns the resident user with the given public UID, or nil. Intended
+// for occasional administrative lookups; it scans the registry.
+func (r *Registry) ByUID(uid string) *User {
+	if uid == "" {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, u := range r.byToken {
+		if u.UID == uid {
+			return u
+		}
+	}
+	return nil
+}
+
+// List returns snapshots of up to limit users whose name or UID contains query
+// (case-insensitive; an empty query matches everyone), ordered by UID. It backs
+// the admin panel's user roster; the snapshots carry no secrets to serialize
+// (Token and MigrateCode are excluded from JSON), but callers should still
+// treat them as admin-only data.
+func (r *Registry) List(query string, limit int) []User {
+	if limit <= 0 {
+		limit = 100
+	}
+	query = strings.ToLower(strings.TrimSpace(query))
+
+	r.mu.RLock()
+	out := make([]User, 0, min(limit, len(r.byToken)))
+	uids := make([]int, 0, len(r.byToken))
+	byUID := make(map[int]*User, len(r.byToken))
+	for _, u := range r.byToken {
+		if query != "" && !strings.Contains(strings.ToLower(u.Name), query) &&
+			!strings.Contains(u.UID, query) {
+			continue
+		}
+		if n, err := strconv.Atoi(u.UID); err == nil {
+			uids = append(uids, n)
+			byUID[n] = u
+		}
+	}
+	sort.Ints(uids)
+	for _, n := range uids {
+		if len(out) >= limit {
+			break
+		}
+		out = append(out, *byUID[n])
+	}
+	r.mu.RUnlock()
+	return out
+}
+
 func (r *Registry) persist(u *User) {
 	if r.store == nil {
 		return
 	}
-	_ = r.store.SaveUser(storage.User{Token: u.Token, UID: u.UID, Name: u.Name, Named: u.Named})
+	_ = r.store.SaveUser(storage.User{Token: u.Token, UID: u.UID, Name: u.Name, Named: u.Named, MigrateCode: u.MigrateCode})
 }
 
 // resolveName sanitizes a chosen name, falling back to the default when empty.

@@ -247,3 +247,33 @@ func TestCreateLimitAndDissolve(t *testing.T) {
 		t.Fatal("a retired channel ID must never be reissued")
 	}
 }
+
+// TestHubStats verifies the aggregate dashboard snapshot across channels.
+func TestHubStats(t *testing.T) {
+	h := NewHub(0)
+	r1 := h.Room("one")
+	r1.AddText("alice", "100", "hello", nil, false, "")
+	r1.AddText("bob", "200", "world!", nil, false, "")
+	r1.AddFile("alice", "100", "a.bin", "application/octet-stream", []byte{1, 2, 3, 4}, "", nil, false, "")
+	r2 := h.Room("two")
+	r2.AddAnnouncement("100", "alice", "notice")
+	_, _, _, cancel := r2.Subscribe("100")
+	defer cancel()
+
+	st := h.Stats()
+	if st.Channels != 2 {
+		t.Fatalf("Channels = %d, want 2", st.Channels)
+	}
+	if st.Messages != 3 || st.Files != 1 || st.Announcements != 1 {
+		t.Fatalf("Messages/Files/Announcements = %d/%d/%d, want 3/1/1", st.Messages, st.Files, st.Announcements)
+	}
+	if want := int64(len("hello") + len("world!")); st.TextBytes != want {
+		t.Fatalf("TextBytes = %d, want %d", st.TextBytes, want)
+	}
+	if st.FileBytes != 4 {
+		t.Fatalf("FileBytes = %d, want 4", st.FileBytes)
+	}
+	if st.Subscribers != 1 || st.Online != 1 {
+		t.Fatalf("Subscribers/Online = %d/%d, want 1/1", st.Subscribers, st.Online)
+	}
+}
