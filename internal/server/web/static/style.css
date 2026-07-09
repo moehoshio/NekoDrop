@@ -36,6 +36,13 @@
   --glow-b: rgba(122, 252, 255, 0.13);
   --glow-c: rgba(255, 126, 182, 0.16);
   --accent-soft: rgba(255, 126, 182, 0.28);
+
+  /* Primary action button: a frosted, low-glare accent tint rather than a
+     solid neon slab, so it sits naturally among the glass surfaces. */
+  --btn-bg: linear-gradient(135deg, rgba(255, 126, 182, 0.4), rgba(167, 139, 250, 0.34) 52%, rgba(122, 252, 255, 0.34));
+  --btn-bg-hover: linear-gradient(135deg, rgba(255, 126, 182, 0.54), rgba(167, 139, 250, 0.46) 52%, rgba(122, 252, 255, 0.46));
+  --btn-fg: #f2f3ff;
+  --btn-border: rgba(255, 255, 255, 0.22);
 }
 
 /* Day mode. The effective theme is set on <html data-theme> by theme.js, which
@@ -66,6 +73,14 @@
   --glow-b: rgba(11, 175, 192, 0.14);
   --glow-c: rgba(232, 81, 154, 0.14);
   --accent-soft: rgba(232, 81, 154, 0.24);
+
+  /* Light theme sits on near-white glass, so the tint keeps enough presence to
+     hold white button text — but muted (deeper rose/teal, lower alpha) so it
+     reads as a calm frosted key rather than a saturated slab. */
+  --btn-bg: linear-gradient(135deg, rgba(214, 76, 143, 0.68), rgba(129, 96, 214, 0.62) 52%, rgba(41, 155, 170, 0.66));
+  --btn-bg-hover: linear-gradient(135deg, rgba(214, 76, 143, 0.8), rgba(129, 96, 214, 0.74) 52%, rgba(41, 155, 170, 0.78));
+  --btn-fg: #ffffff;
+  --btn-border: rgba(255, 255, 255, 0.5);
 }
 
 * { box-sizing: border-box; }
@@ -165,8 +180,8 @@ body.landing {
 .create-form button[type="submit"] {
   margin-top: 14px;
   padding: 12px;
-  background: var(--grad);
-  color: var(--on-accent);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
   font-weight: 600;
 }
 
@@ -274,21 +289,37 @@ button:focus-visible {
   outline-offset: 2px;
 }
 
-/* Primary (gradient) buttons share a consistent depth and hover lift. */
+/* Primary buttons: a frosted accent tint with a hairline edge and a top
+   highlight, so they read as glass keys rather than glossy candy slabs. The
+   depth is a soft neutral shadow, not a coloured glow. */
 .join-form button[type="submit"],
 .create-form button[type="submit"],
 .composer button[type="submit"],
 .settings-form button[type="submit"],
 .announce-form button,
 .pill-button {
-  box-shadow: 0 6px 18px rgba(255, 126, 182, 0.25);
+  border: 1px solid var(--btn-border);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--glass-hi);
+  font-weight: 600;
 }
 .join-form button[type="submit"]:hover,
 .create-form button[type="submit"]:hover,
 .composer button[type="submit"]:hover,
+.settings-form button[type="submit"]:hover,
+.announce-form button:hover,
 .pill-button:hover {
-  box-shadow: 0 8px 22px rgba(255, 126, 182, 0.35);
+  background: var(--btn-bg-hover);
 }
+/* The tint already lifts on hover, so skip the global brightness bump that
+   would otherwise wash the frosted button out. */
+.join-form button[type="submit"]:hover,
+.create-form button[type="submit"]:hover,
+.composer button[type="submit"]:hover,
+.settings-form button[type="submit"]:hover,
+.announce-form button:hover,
+.pill-button:hover { filter: none; }
 
 /* Secondary / ghost button used for low-emphasis actions. */
 .ghost-button {
@@ -397,8 +428,8 @@ input[type="radio"]:focus-visible {
 .join-form button[type="submit"] {
   margin-top: 16px;
   padding: 12px;
-  background: var(--grad);
-  color: var(--on-accent);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
   font-weight: 600;
 }
 
@@ -463,8 +494,8 @@ body.room {
   line-height: 1;
 }
 .pill-button {
-  background: var(--grad);
-  color: var(--on-accent);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
   font-weight: 600;
   padding: 7px 14px;
   border-radius: 9px;
@@ -735,8 +766,8 @@ video.media-preview { cursor: default; }
 
 .composer button[type="submit"] {
   padding: 12px 18px;
-  background: var(--grad);
-  color: var(--on-accent);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
   font-weight: 600;
 }
 
@@ -835,8 +866,8 @@ video.media-preview { cursor: default; }
 .settings-form button[type="submit"], .announce-form button {
   margin-top: 12px;
   padding: 10px;
-  background: var(--grad);
-  color: var(--on-accent);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
   font-weight: 600;
 }
 
