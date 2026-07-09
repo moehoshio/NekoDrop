@@ -88,20 +88,33 @@ func TestMigrationProtectsFromEviction(t *testing.T) {
 	}
 }
 
-// TestDefaultNameAndNamedFlag verifies the unnamed default and the Named flag.
-func TestDefaultNameAndNamedFlag(t *testing.T) {
+// TestAutoNameAndNamedFlag verifies that a visitor who never chose a name is
+// assigned a random one (never empty, never a bare "anonymous" state) and that
+// the Named flag tracks whether the current name was deliberately chosen.
+func TestAutoNameAndNamedFlag(t *testing.T) {
 	r := NewRegistry()
 	u := r.Create("")
-	if u.Name != DefaultName || u.Named {
-		t.Fatalf("unnamed user = {%q %v}, want {%q false}", u.Name, u.Named, DefaultName)
+	if u.Name == "" || u.Named {
+		t.Fatalf("unnamed user = {%q %v}, want a generated name and Named=false", u.Name, u.Named)
 	}
 	renamed, ok := r.Rename(u.Token, "  Bob  ")
 	if !ok || renamed.Name != "Bob" || !renamed.Named {
 		t.Fatalf("rename = {%q %v ok=%v}, want {Bob true true}", renamed.Name, renamed.Named, ok)
 	}
-	// Clearing the name reverts to the default, unnamed state.
+	// Clearing the name assigns a fresh generated one and the unnamed state.
 	reverted, _ := r.Rename(u.Token, "   ")
-	if reverted.Name != DefaultName || reverted.Named {
-		t.Fatalf("revert = {%q %v}, want {%q false}", reverted.Name, reverted.Named, DefaultName)
+	if reverted.Name == "" || reverted.Name == "Bob" || reverted.Named {
+		t.Fatalf("revert = {%q %v}, want a fresh generated name and Named=false", reverted.Name, reverted.Named)
+	}
+}
+
+// TestRandomNameShape guards that generated names are non-empty, sane display
+// names that survive the sanitizer unchanged.
+func TestRandomNameShape(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		n := RandomName()
+		if n == "" || SanitizeName(n) != n {
+			t.Fatalf("RandomName() = %q, want a sanitizer-stable non-empty name", n)
+		}
 	}
 }

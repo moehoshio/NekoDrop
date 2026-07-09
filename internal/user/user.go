@@ -5,15 +5,16 @@
 // that two people sharing a nickname remain distinguishable, and so mentions
 // can target a specific person.
 //
-// A visitor who has never chosen a name keeps a default, auto-assigned name
-// (DefaultName). Because the default is a distinct word, a never-named guest
-// ("Guest#123") is always visually distinguishable from someone who has
-// deliberately typed a name — even a name like "anonymous".
+// A visitor who has never chosen a name is assigned a friendly random one
+// (RandomName) instead of a generic "anonymous" label. The Named flag records
+// whether the current name was deliberately chosen, so the UI can still invite
+// auto-named visitors to pick their own.
 package user
 
 import (
 	"crypto/rand"
 	"encoding/hex"
+	mrand "math/rand/v2"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,10 +28,27 @@ import (
 // keeps the "alice#123" rendering visually tidy from the very first user.
 const firstUID = 100
 
-// DefaultName is the display name assigned to a visitor who has not chosen one.
-// It is intentionally distinct from any common deliberate nickname so the
-// unnamed state is always obvious in the UI.
-const DefaultName = "Guest"
+// Cat-themed word lists for RandomName. Names are proper nouns and therefore
+// not localized; system placeholders (deleted/banned accounts) are localized
+// by the client instead.
+var (
+	nameAdjectives = []string{
+		"Swift", "Lucky", "Mint", "Sunny", "Fuzzy", "Clever", "Dapper", "Mellow",
+		"Nimble", "Cosmo", "Pepper", "Ginger", "Shadow", "Ivory", "Ember", "Willow",
+	}
+	nameAnimals = []string{
+		"Paw", "Whisker", "Neko", "Tabby", "Kitten", "Calico", "Bobtail", "Mau",
+		"Purr", "Meow", "Mochi", "Bento", "Catnip", "Tom", "Lynx", "Puma",
+	}
+)
+
+// RandomName returns a friendly, randomly generated display name for a visitor
+// who has not chosen one (e.g. "SwiftPaw"). The appended UID keeps two users
+// with the same generated name distinguishable, so collisions are harmless.
+func RandomName() string {
+	return nameAdjectives[mrand.IntN(len(nameAdjectives))] +
+		nameAnimals[mrand.IntN(len(nameAnimals))]
+}
 
 // DefaultMaxUsers bounds how many identities are retained in memory. Because a
 // fresh identity is minted for every cookieless request, an unbounded registry
@@ -194,8 +212,8 @@ func (r *Registry) Create(name string) *User {
 
 // Rename updates the display name of the user bound to token. The UID is never
 // changed, so existing mentions and history remain valid. A non-empty name
-// marks the user as named; clearing the name reverts to the default and the
-// unnamed state.
+// marks the user as named; clearing the name assigns a fresh random name and
+// returns the user to the unnamed state.
 func (r *Registry) Rename(token, name string) (*User, bool) {
 	r.mu.Lock()
 	u, ok := r.byToken[token]
@@ -377,12 +395,13 @@ func (r *Registry) persist(u *User) {
 	_ = r.store.SaveUser(storage.User{Token: u.Token, UID: u.UID, Name: u.Name, Named: u.Named, MigrateCode: u.MigrateCode})
 }
 
-// resolveName sanitizes a chosen name, falling back to the default when empty.
+// resolveName sanitizes a chosen name, falling back to a freshly generated
+// random name when empty.
 func resolveName(name string) string {
 	if s := SanitizeName(name); s != "" {
 		return s
 	}
-	return DefaultName
+	return RandomName()
 }
 
 // SanitizeName trims a display name and applies a length limit. An empty result
