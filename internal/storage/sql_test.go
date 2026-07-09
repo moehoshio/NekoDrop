@@ -36,6 +36,42 @@ func TestSQLiteUserRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSQLiteMigrateCodeRoundTrip(t *testing.T) {
+	st := newSQLite(t)
+	if err := st.SaveUser(User{Token: "tok", UID: "100", Name: "Alice", Named: true, MigrateCode: "code-1"}); err != nil {
+		t.Fatalf("save user: %v", err)
+	}
+	users, err := st.LoadUsers()
+	if err != nil || len(users) != 1 || users[0].MigrateCode != "code-1" {
+		t.Fatalf("migrate code not persisted: %+v err=%v", users, err)
+	}
+	// Disabling migration clears the code.
+	if err := st.SaveUser(User{Token: "tok", UID: "100", Name: "Alice", Named: true}); err != nil {
+		t.Fatalf("resave user: %v", err)
+	}
+	users, _ = st.LoadUsers()
+	if len(users) != 1 || users[0].MigrateCode != "" {
+		t.Fatalf("migrate code not cleared: %+v", users)
+	}
+}
+
+func TestSQLiteKVRoundTrip(t *testing.T) {
+	st := newSQLite(t)
+	if _, ok, err := st.LoadKV("admin_state"); err != nil || ok {
+		t.Fatalf("missing key: ok=%v err=%v", ok, err)
+	}
+	if err := st.SaveKV("admin_state", `{"a":1}`); err != nil {
+		t.Fatalf("save kv: %v", err)
+	}
+	if err := st.SaveKV("admin_state", `{"a":2}`); err != nil {
+		t.Fatalf("overwrite kv: %v", err)
+	}
+	v, ok, err := st.LoadKV("admin_state")
+	if err != nil || !ok || v != `{"a":2}` {
+		t.Fatalf("load kv = %q ok=%v err=%v", v, ok, err)
+	}
+}
+
 func TestSQLiteChannelAndHistoryRoundTrip(t *testing.T) {
 	st := newSQLite(t)
 

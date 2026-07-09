@@ -22,12 +22,15 @@ import (
 	"time"
 )
 
-// User is the persisted form of a visitor identity.
+// User is the persisted form of a visitor identity. MigrateCode, when
+// non-empty, is the user's account-migration code: a second, user-managed
+// bearer secret that lets another browser adopt this identity.
 type User struct {
-	Token string
-	UID   string
-	Name  string
-	Named bool
+	Token       string
+	UID         string
+	Name        string
+	Named       bool
+	MigrateCode string
 }
 
 // Channel is the persisted form of a channel's definition and membership.
@@ -124,6 +127,12 @@ type Store interface {
 	LoadAnnouncements(channelID string) ([]Announcement, error)
 	AppendAnnouncement(Announcement) error
 
+	// Key-value settings. LoadKV reports whether the key exists; SaveKV
+	// overwrites any previous value. Used for small server-side state such as
+	// the admin panel's bans and runtime configuration overrides.
+	LoadKV(key string) (value string, ok bool, err error)
+	SaveKV(key, value string) error
+
 	// Close releases any underlying resources.
 	Close() error
 }
@@ -168,4 +177,6 @@ func (*Memory) SaveFile(File) error                              { return nil }
 func (*Memory) DeleteFile(string) error                          { return nil }
 func (*Memory) LoadAnnouncements(string) ([]Announcement, error) { return nil, nil }
 func (*Memory) AppendAnnouncement(Announcement) error            { return nil }
+func (*Memory) LoadKV(string) (string, bool, error)              { return "", false, nil }
+func (*Memory) SaveKV(string, string) error                      { return nil }
 func (*Memory) Close() error                                     { return nil }

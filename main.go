@@ -70,6 +70,10 @@ func main() {
 	}
 	defer store.Close()
 
+	if cfg.Admin.Enabled && cfg.Admin.Token == "" {
+		log.Printf("nekodrop: admin.enabled is set but admin.token is empty; the admin panel stays disabled")
+	}
+
 	srv, err := server.New(server.Options{
 		MaxUploadBytes:     cfg.MaxUploadBytes,
 		MaxChannelsPerUser: cfg.MaxChannelsPerUser,
@@ -81,10 +85,15 @@ func main() {
 			MaxSubscribersPerChannel: cfg.Limits.MaxSubscribersPerChannel,
 			MaxChannels:              cfg.Limits.MaxChannels,
 		},
-		MaxUsers: cfg.Limits.MaxUsers,
+		MaxUsers:     cfg.Limits.MaxUsers,
+		AdminEnabled: cfg.Admin.Active(),
+		AdminToken:   cfg.Admin.Token,
 	})
 	if err != nil {
 		log.Fatalf("nekodrop: failed to initialize server: %v", err)
+	}
+	if cfg.Admin.Active() {
+		log.Printf("nekodrop: admin panel enabled at /admin")
 	}
 
 	httpServer := &http.Server{

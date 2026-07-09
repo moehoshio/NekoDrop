@@ -100,6 +100,7 @@ func (s *sqlStore) migrate(d dialect) error {
 			uid VARCHAR(64) NOT NULL,
 			name ` + d.textType + ` NOT NULL,
 			named BOOLEAN NOT NULL,
+			migrate_code VARCHAR(128) NOT NULL DEFAULT '',
 			PRIMARY KEY (uid)
 		)`,
 		`CREATE TABLE IF NOT EXISTS channels (
@@ -157,6 +158,11 @@ func (s *sqlStore) migrate(d dialect) error {
 			created DATETIME NOT NULL,
 			PRIMARY KEY (id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS kv (
+			k VARCHAR(128) NOT NULL,
+			v ` + d.textType + ` NOT NULL,
+			PRIMARY KEY (k)
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages (channel_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_announcements_channel ON announcements (channel_id)`,
 	}
@@ -173,6 +179,7 @@ func (s *sqlStore) migrate(d dialect) error {
 		`ALTER TABLE channels ADD COLUMN nicks ` + d.textType + ` NOT NULL DEFAULT '{}'`,
 		`ALTER TABLE messages ADD COLUMN reply_to VARCHAR(64) NOT NULL DEFAULT ''`,
 		`ALTER TABLE messages ADD COLUMN edited BOOLEAN NOT NULL DEFAULT 0`,
+		`ALTER TABLE users ADD COLUMN migrate_code VARCHAR(128) NOT NULL DEFAULT ''`,
 	} {
 		_, _ = s.db.Exec(q)
 	}
@@ -186,7 +193,7 @@ func (s *sqlStore) Close() error { return s.db.Close() }
 // --- Users ---
 
 func (s *sqlStore) LoadUsers() ([]User, error) {
-	rows, err := s.db.Query(`SELECT token, uid, name, named FROM users`)
+	rows, err := s.db.Query(`SELECT token, uid, name, named, migrate_code FROM users`)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +201,7 @@ func (s *sqlStore) LoadUsers() ([]User, error) {
 	var out []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.Token, &u.UID, &u.Name, &u.Named); err != nil {
+		if err := rows.Scan(&u.Token, &u.UID, &u.Name, &u.Named, &u.MigrateCode); err != nil {
 			return nil, err
 		}
 		out = append(out, u)
@@ -206,8 +213,8 @@ func (s *sqlStore) SaveUser(u User) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
-		`REPLACE INTO users (token, uid, name, named) VALUES (?, ?, ?, ?)`,
-		u.Token, u.UID, u.Name, u.Named)
+		`REPLACE INTO users (token, uid, name, named, migrate_code) VALUES (?, ?, ?, ?, ?)`,
+		u.Token, u.UID, u.Name, u.Named, u.MigrateCode)
 	return err
 }
 
@@ -381,6 +388,27 @@ func (s *sqlStore) AppendAnnouncement(a Announcement) error {
 	_, err := s.db.Exec(`REPLACE INTO announcements (id, channel_id, author_uid, author_name, body, created)
 		VALUES (?, ?, ?, ?, ?, ?)`,
 		a.ID, a.ChannelID, a.AuthorUID, a.AuthorName, a.Text, a.Time.UTC())
+	return err
+}
+
+// --- Key-value settings ---
+
+func (s *sqlStore) LoadKV(key string) (string, bool, error) {
+	var v string
+	err := s.db.QueryRow(`SELECT v FROM kv WHERE k = ?`, key).Scan(&v)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return v, true, nil
+}
+
+func (s *sqlStore) SaveKV(key, value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`REPLACE INTO kv (k, v) VALUES (?, ?)`, key, value)
 	return err
 }
 

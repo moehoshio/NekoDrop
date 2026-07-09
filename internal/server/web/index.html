@@ -87,6 +87,38 @@
         </form>
       </details>
 
+      <details id="migrate-box" class="create-box">
+        <summary data-i18n="landing.migrate_summary">Account migration</summary>
+        <div class="migrate-body">
+          <p class="hint" data-i18n="landing.migrate_hint">
+            Use one account in several browsers. Off by default: enable it to get
+            a persistent migration code, then enter that code in another browser
+            to inherit this account there.
+          </p>
+          <p id="migrate-status" class="form-note" hidden></p>
+          <div id="migrate-code-row" hidden>
+            <label for="migrate-code" data-i18n="landing.migrate_code_label">Your migration code</label>
+            <div class="migrate-code-line">
+              <input id="migrate-code" type="text" readonly>
+              <button id="migrate-copy" type="button" class="ghost-button" data-i18n="landing.migrate_copy">Copy</button>
+            </div>
+            <p class="hint" data-i18n="landing.migrate_secret">Keep this code secret — anyone who has it can use your account.</p>
+          </div>
+          <div class="migrate-actions">
+            <button id="migrate-enable" type="button" data-i18n="landing.migrate_enable" hidden>Enable &amp; generate code</button>
+            <button id="migrate-regen" type="button" class="ghost-button" data-i18n="landing.migrate_regen" hidden>Regenerate code</button>
+            <button id="migrate-disable" type="button" class="ghost-button" data-i18n="landing.migrate_disable" hidden>Disable migration</button>
+          </div>
+          <form id="migrate-form" class="join-form migrate-form" autocomplete="off">
+            <label for="migrate-input" data-i18n="landing.migrate_use_label">Have a code? Adopt that account on this browser</label>
+            <input id="migrate-input" type="text" data-i18n-placeholder="landing.migrate_use_ph" placeholder="Paste migration code">
+            <button type="submit" data-i18n="landing.migrate_use">Migrate account</button>
+            <p id="migrate-error" class="form-error" hidden></p>
+            <p id="migrate-done" class="form-note" hidden></p>
+          </form>
+        </div>
+      </details>
+
       <p class="hint" data-i18n="landing.hint">
         Everyone who enters the same code joins the same channel. Share text and
         files; other members can download whatever you drop.

@@ -22,6 +22,72 @@ func TestRegistryEvictsToStayBounded(t *testing.T) {
 	}
 }
 
+// TestMigrationLifecycle exercises enable, lookup, regenerate and disable of
+// account-migration codes.
+func TestMigrationLifecycle(t *testing.T) {
+	r := NewRegistry()
+	u := r.Create("Alice")
+
+	if r.MigrationCode(u.Token) != "" {
+		t.Fatal("migration must be off by default")
+	}
+	if r.ByMigrationCode("") != nil {
+		t.Fatal("empty code must never resolve")
+	}
+
+	code, ok := r.EnableMigration(u.Token)
+	if !ok || code == "" {
+		t.Fatalf("enable = (%q, %v)", code, ok)
+	}
+	if got := r.ByMigrationCode(code); got == nil || got.UID != u.UID {
+		t.Fatalf("ByMigrationCode = %+v, want user %s", got, u.UID)
+	}
+
+	// Regenerating invalidates the old code.
+	code2, _ := r.EnableMigration(u.Token)
+	if code2 == code {
+		t.Fatal("regenerated code should differ")
+	}
+	if r.ByMigrationCode(code) != nil {
+		t.Fatal("old code should be invalid after regeneration")
+	}
+
+	// Disabling invalidates the current code.
+	if !r.DisableMigration(u.Token) {
+		t.Fatal("disable should succeed for a known token")
+	}
+	if r.ByMigrationCode(code2) != nil || r.MigrationCode(u.Token) != "" {
+		t.Fatal("code should be invalid after disabling")
+	}
+
+	// Unknown tokens are rejected.
+	if _, ok := r.EnableMigration("nope"); ok {
+		t.Fatal("enable with unknown token should fail")
+	}
+	if r.DisableMigration("nope") {
+		t.Fatal("disable with unknown token should fail")
+	}
+}
+
+// TestMigrationProtectsFromEviction verifies an unnamed user who opted into
+// migration outlives plain anonymous identities under memory pressure.
+func TestMigrationProtectsFromEviction(t *testing.T) {
+	r := NewRegistryWithStore(nil, 3)
+	keeper := r.Create("") // unnamed, but opts into migration
+	code, _ := r.EnableMigration(keeper.Token)
+	r.Create("")
+	r.Create("")
+	r.Create("")
+	r.Create("")
+
+	if r.Get(keeper.Token) == nil {
+		t.Fatal("migration-enabled user should be preserved over plain anonymous users")
+	}
+	if got := r.ByMigrationCode(code); got == nil || got.UID != keeper.UID {
+		t.Fatalf("migration code lost during eviction: %+v", got)
+	}
+}
+
 // TestDefaultNameAndNamedFlag verifies the unnamed default and the Named flag.
 func TestDefaultNameAndNamedFlag(t *testing.T) {
 	r := NewRegistry()

@@ -1392,6 +1392,14 @@ func (h *Hub) Lookup(key string) (*Room, bool) {
 	return r, ok
 }
 
+// LookupID returns an existing channel by its permanent channel ID.
+func (h *Hub) LookupID(id string) (*Room, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	r, ok := h.byID[id]
+	return r, ok
+}
+
 // Create makes a new owned channel with the given key and settings. It fails if
 // the key is taken or the owner is over quota.
 func (h *Hub) Create(key, ownerUID string, s Settings) (*Room, error) {
@@ -1607,6 +1615,58 @@ func (h *Hub) JoinedBy(uid string) []Info {
 		return out[i].Name < out[j].Name
 	})
 	return out
+}
+
+// AllInfos returns a snapshot of every live channel (public, private and
+// unlisted alike), sorted by key. It backs the admin panel's channel roster and
+// must never be exposed to regular users.
+func (h *Hub) AllInfos() []Info {
+	h.mu.Lock()
+	rooms := make([]*Room, 0, len(h.byKey))
+	for _, r := range h.byKey {
+		rooms = append(rooms, r)
+	}
+	h.mu.Unlock()
+
+	out := make([]Info, 0, len(rooms))
+	for _, r := range rooms {
+		info := r.Info()
+		if !info.Dissolved {
+			out = append(out, info)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	return out
+}
+
+// SetMaxPerUID changes the per-owner channel quota at runtime (<= 0 means
+// unlimited). Existing over-quota owners keep their channels; the new quota
+// applies to subsequent creations.
+func (h *Hub) SetMaxPerUID(n int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.maxPerUID = n
+}
+
+// ApplyLimits changes the resource limits at runtime, re-applying them to every
+// live channel (evicting resident history that no longer fits). Zero-valued
+// fields fall back to DefaultLimits, mirroring construction.
+func (h *Hub) ApplyLimits(l Limits) {
+	l = l.withDefaults()
+	h.mu.Lock()
+	h.limits = l
+	rooms := make([]*Room, 0, len(h.byKey))
+	for _, r := range h.byKey {
+		rooms = append(rooms, r)
+	}
+	h.mu.Unlock()
+
+	for _, r := range rooms {
+		r.mu.Lock()
+		r.applyLimits(l)
+		r.trimLocked()
+		r.mu.Unlock()
+	}
 }
 
 // CreatedBy returns how many active channels ownerUID currently owns.
