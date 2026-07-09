@@ -20,8 +20,10 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"net/http"
+	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/moehoshio/NekoDrop/internal/room"
 	"github.com/moehoshio/NekoDrop/internal/storage"
@@ -195,6 +197,9 @@ func (s *Server) handleAdminPage(w http.ResponseWriter, r *http.Request) {
 	s.serveFile(w, r, "admin.html", "text/html; charset=utf-8")
 }
 
+// handleAdminOverview serves the dashboard statistics: live counters from the
+// hub and registry, resident content sizes, Go process memory, uptime, and —
+// on persistent backends — database totals.
 func (s *Server) handleAdminOverview(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdmin(w, r) {
 		return
@@ -203,13 +208,52 @@ func (s *Server) handleAdminOverview(w http.ResponseWriter, r *http.Request) {
 	a.mu.RLock()
 	bannedUsers, bannedChannels := len(a.state.BannedUsers), len(a.state.BannedChannels)
 	a.mu.RUnlock()
-	writeJSON(w, http.StatusOK, map[string]any{
-		"backend":        s.store.Backend(),
-		"channels":       s.hub.Len(),
-		"users":          s.users.Len(),
+
+	hubStats := s.hub.Stats()
+	userStats := s.users.Stats()
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+
+	payload := map[string]any{
+		"backend":       s.store.Backend(),
+		"uptimeSeconds": int64(time.Since(s.startTime).Seconds()),
+
+		// Live state.
+		"channels":       hubStats.Channels,
+		"users":          userStats.Users,
+		"namedUsers":     userStats.Named,
+		"migrationUsers": userStats.Migration,
+		"online":         hubStats.Online,
+		"connections":    hubStats.Subscribers,
 		"bannedUsers":    bannedUsers,
 		"bannedChannels": bannedChannels,
-	})
+
+		// Resident content.
+		"messages":      hubStats.Messages,
+		"files":         hubStats.Files,
+		"announcements": hubStats.Announcements,
+		"textBytes":     hubStats.TextBytes,
+		"fileBytes":     hubStats.FileBytes,
+		"residentBytes": hubStats.TextBytes + hubStats.FileBytes,
+
+		// Go process.
+		"memHeapBytes": mem.HeapAlloc,
+		"memSysBytes":  mem.Sys,
+		"goroutines":   runtime.NumGoroutine(),
+	}
+	if st, err := s.store.Stats(); err == nil && st.Persistent {
+		payload["store"] = map[string]any{
+			"persistent":    true,
+			"sizeBytes":     st.SizeBytes,
+			"users":         st.Users,
+			"channels":      st.Channels,
+			"messages":      st.Messages,
+			"files":         st.Files,
+			"fileBytes":     st.FileBytes,
+			"announcements": st.Announcements,
+		}
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 // adminChannel is a channel row in the admin roster: its public info plus the

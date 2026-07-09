@@ -78,6 +78,9 @@ type Server struct {
 	baseMaxChannelsPerUser int
 	baseLimits             room.Limits
 	baseMaxUsers           int
+
+	// startTime anchors the uptime figure on the admin dashboard.
+	startTime time.Time
 }
 
 // New constructs a Server with the given options.
@@ -106,6 +109,7 @@ func New(opts Options) (*Server, error) {
 		baseMaxChannelsPerUser: opts.MaxChannelsPerUser,
 		baseLimits:             opts.Limits,
 		baseMaxUsers:           opts.MaxUsers,
+		startTime:              time.Now(),
 	}
 	// Re-apply any persisted runtime overrides from a previous run.
 	s.applyRuntimeConfig()

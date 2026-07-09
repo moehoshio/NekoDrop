@@ -93,6 +93,23 @@ type Announcement struct {
 	Time       time.Time
 }
 
+// Stats are approximate persisted totals reported for the admin dashboard.
+// The no-op memory backend reports Persistent=false and zeroes.
+type Stats struct {
+	// Persistent reports whether the backend actually stores anything.
+	Persistent bool
+	// SizeBytes is the approximate on-disk size of the database (0 = unknown).
+	SizeBytes int64
+	// Row counts per record type.
+	Users         int
+	Channels      int
+	Messages      int
+	Files         int
+	Announcements int
+	// FileBytes is the total size of persisted file payloads.
+	FileBytes int64
+}
+
 // Store is the durable persistence contract. Implementations must be safe for
 // concurrent use. All Load* methods return the persisted records (or empty
 // slices for the no-op backend); all write methods are best-effort from the
@@ -132,6 +149,9 @@ type Store interface {
 	// the admin panel's bans and runtime configuration overrides.
 	LoadKV(key string) (value string, ok bool, err error)
 	SaveKV(key, value string) error
+
+	// Stats reports approximate persisted totals for the admin dashboard.
+	Stats() (Stats, error)
 
 	// Close releases any underlying resources.
 	Close() error
@@ -179,4 +199,5 @@ func (*Memory) LoadAnnouncements(string) ([]Announcement, error) { return nil, n
 func (*Memory) AppendAnnouncement(Announcement) error            { return nil }
 func (*Memory) LoadKV(string) (string, bool, error)              { return "", false, nil }
 func (*Memory) SaveKV(string, string) error                      { return nil }
+func (*Memory) Stats() (Stats, error)                            { return Stats{}, nil }
 func (*Memory) Close() error                                     { return nil }

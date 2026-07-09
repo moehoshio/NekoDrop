@@ -38,6 +38,7 @@
   }
 
   function showLogin(message) {
+    stopOverviewRefresh();
     overview.hidden = true;
     configCard.hidden = true;
     channelsCard.hidden = true;
@@ -63,6 +64,7 @@
     channelsCard.hidden = false;
     usersCard.hidden = false;
     renderOverview(await res.json());
+    startOverviewRefresh();
     await Promise.all([loadConfig(), loadChannels(), loadUsers()]);
     return true;
   }
@@ -83,32 +85,112 @@
     showLogin("");
   });
 
-  // ---------- overview ----------
+  // ---------- overview dashboard ----------
+  // Stat tiles: the value in primary ink, the label in muted ink. No charts —
+  // these are headline numbers refreshed on a steady poll while unlocked.
+
+  function fmtBytes(n) {
+    n = Number(n) || 0;
+    if (n < 1024) return n + " B";
+    const units = ["KiB", "MiB", "GiB", "TiB"];
+    let u = -1;
+    do {
+      n /= 1024;
+      u++;
+    } while (n >= 1024 && u < units.length - 1);
+    return (n >= 100 ? n.toFixed(0) : n.toFixed(1)) + " " + units[u];
+  }
+
+  function fmtUptime(sec) {
+    sec = Math.max(0, Number(sec) || 0);
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    if (d > 0) return d + "d " + h + "h";
+    if (h > 0) return h + "h " + m + "m";
+    if (m > 0) return m + "m " + Math.floor(sec % 60) + "s";
+    return Math.floor(sec) + "s";
+  }
+
   let lastOverview = null;
   function renderOverview(data) {
     lastOverview = data || lastOverview;
     if (!lastOverview) return;
+    const d = lastOverview;
     overviewStats.innerHTML = "";
-    const rows = [
-      ["admin.backend", lastOverview.backend],
-      ["admin.channels_count", lastOverview.channels],
-      ["admin.users_count", lastOverview.users],
-      ["admin.banned_channels", lastOverview.bannedChannels],
-      ["admin.banned_users", lastOverview.bannedUsers],
-    ];
-    rows.forEach(([key, value]) => {
-      const dt = document.createElement("dt");
-      dt.textContent = t(key);
-      const dd = document.createElement("dd");
-      dd.textContent = String(value);
-      overviewStats.appendChild(dt);
-      overviewStats.appendChild(dd);
-    });
+
+    const section = (titleKey, tiles) => {
+      const h = document.createElement("h3");
+      h.className = "stat-section";
+      h.textContent = t(titleKey);
+      overviewStats.appendChild(h);
+      const grid = document.createElement("div");
+      grid.className = "stat-grid";
+      tiles.forEach(([labelKey, value]) => {
+        const tile = document.createElement("div");
+        tile.className = "stat-tile";
+        const v = document.createElement("div");
+        v.className = "stat-value";
+        v.textContent = String(value);
+        const l = document.createElement("div");
+        l.className = "stat-label";
+        l.textContent = t(labelKey);
+        tile.appendChild(v);
+        tile.appendChild(l);
+        grid.appendChild(tile);
+      });
+      overviewStats.appendChild(grid);
+    };
+
+    section("admin.sec_live", [
+      ["admin.channels_count", d.channels],
+      ["admin.users_count", d.users],
+      ["admin.st_online", d.online],
+      ["admin.st_connections", d.connections],
+      ["admin.st_named", d.namedUsers],
+      ["admin.st_migration", d.migrationUsers],
+      ["admin.banned_channels", d.bannedChannels],
+      ["admin.banned_users", d.bannedUsers],
+    ]);
+    section("admin.sec_content", [
+      ["admin.st_messages", d.messages],
+      ["admin.st_files", d.files],
+      ["admin.st_announcements", d.announcements],
+      ["admin.st_resident_bytes", fmtBytes(d.residentBytes)],
+      ["admin.st_heap", fmtBytes(d.memHeapBytes)],
+      ["admin.st_sys", fmtBytes(d.memSysBytes)],
+      ["admin.st_goroutines", d.goroutines],
+      ["admin.st_uptime", fmtUptime(d.uptimeSeconds)],
+    ]);
+    const storeTiles = [["admin.backend", d.backend]];
+    if (d.store && d.store.persistent) {
+      storeTiles.push(
+        ["admin.st_db_size", fmtBytes(d.store.sizeBytes)],
+        ["admin.st_store_messages", d.store.messages],
+        ["admin.st_store_files", d.store.files],
+        ["admin.st_store_file_bytes", fmtBytes(d.store.fileBytes)],
+        ["admin.st_store_users", d.store.users],
+        ["admin.st_store_channels", d.store.channels]
+      );
+    }
+    section("admin.sec_store", storeTiles);
   }
 
   async function refreshOverview() {
     const res = await api("/api/admin/overview").catch(() => null);
     if (res && res.ok) renderOverview(await res.json());
+  }
+
+  // The dashboard refreshes itself while the panel is unlocked.
+  let overviewTimer = null;
+  function startOverviewRefresh() {
+    if (overviewTimer === null) overviewTimer = window.setInterval(refreshOverview, 5000);
+  }
+  function stopOverviewRefresh() {
+    if (overviewTimer !== null) {
+      window.clearInterval(overviewTimer);
+      overviewTimer = null;
+    }
   }
 
   // ---------- runtime configuration ----------

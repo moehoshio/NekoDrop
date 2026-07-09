@@ -412,6 +412,48 @@ func (s *sqlStore) SaveKV(key, value string) error {
 	return err
 }
 
+// --- Stats ---
+
+// Stats reports persisted totals. The on-disk size is dialect-specific and
+// best-effort: PRAGMAs for SQLite, information_schema for MySQL.
+func (s *sqlStore) Stats() (Stats, error) {
+	st := Stats{Persistent: true}
+	counts := []struct {
+		query string
+		dst   *int
+	}{
+		{`SELECT COUNT(*) FROM users`, &st.Users},
+		{`SELECT COUNT(*) FROM channels`, &st.Channels},
+		{`SELECT COUNT(*) FROM messages`, &st.Messages},
+		{`SELECT COUNT(*) FROM announcements`, &st.Announcements},
+	}
+	for _, c := range counts {
+		if err := s.db.QueryRow(c.query).Scan(c.dst); err != nil {
+			return st, err
+		}
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(LENGTH(data)), 0) FROM files`).
+		Scan(&st.Files, &st.FileBytes); err != nil {
+		return st, err
+	}
+
+	switch s.backend {
+	case "sqlite":
+		var pageCount, pageSize int64
+		if s.db.QueryRow(`PRAGMA page_count`).Scan(&pageCount) == nil &&
+			s.db.QueryRow(`PRAGMA page_size`).Scan(&pageSize) == nil {
+			st.SizeBytes = pageCount * pageSize
+		}
+	case "mysql":
+		var size sql.NullInt64
+		if s.db.QueryRow(`SELECT COALESCE(SUM(data_length + index_length), 0)
+			FROM information_schema.tables WHERE table_schema = DATABASE()`).Scan(&size) == nil && size.Valid {
+			st.SizeBytes = size.Int64
+		}
+	}
+	return st, nil
+}
+
 // --- JSON helpers for slice/map columns ---
 
 func encodeSlice(v []string) string {

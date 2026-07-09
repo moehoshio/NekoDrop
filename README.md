@@ -125,6 +125,7 @@ A server-operator backend, **disabled by default**. Enable it in the config file
 
 Then open `/admin` and unlock it with the token (sent as an `X-Admin-Token` header on every request). While disabled, `/admin` and the whole admin API answer 404. The panel manages site-wide state layered on top of the per-channel owner/admin moderation model:
 
+- **Dashboard** — a self-refreshing statistics overview: live channels, known/named/migration-enabled users, people online and active connections, resident messages/files/announcements and their memory footprint, Go process memory (heap and OS), goroutines, uptime, and — on persistent backends — database size and stored totals.
 - **Availability** — disable (ban) whole channels or ban users site-wide. A disabled channel disappears from every listing and rejects reading, posting, joining and downloads; a banned user can still read but cannot post, upload, join, or create channels.
 - **Exemptions** — give an individual channel or user their own upload size limit, independent of the global one. A per-user limit wins over a per-channel one, which wins over the global configuration, so an exemption can either raise or tighten the effective limit.
 - **Runtime configuration** — edit the configuration knobs online (upload size, per-user channel quota, and every `limits.*` value). Changes apply immediately to the live server and are stored as overrides on top of the config file; clearing a field reverts to the file's value.
@@ -212,7 +213,7 @@ When the admin panel is enabled, these additional endpoints exist (all require t
 | Method & path | Description |
 | ------------- | ----------- |
 | `GET /admin` | Admin panel page |
-| `GET /api/admin/overview` | Counters: live channels, known users, bans, storage backend |
+| `GET /api/admin/overview` | Dashboard statistics: channels, users, online/connections, messages, files, resident memory, process memory, uptime, database totals |
 | `GET /api/admin/channels` | All live channels (`?q=` filters), with ban state and upload exemption |
 | `PATCH /api/admin/channels/{id}` | Set `{"banned"}` and/or `{"maxUploadBytes"}` (`null` clears) for a channel |
 | `GET /api/admin/users` | Known users (`?q=` filters), with ban state and upload exemption |

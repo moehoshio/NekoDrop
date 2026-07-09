@@ -972,14 +972,34 @@ video.media-preview { cursor: default; }
   color: var(--accent-2);
   vertical-align: middle;
 }
-.admin-stats {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 6px 18px;
-  margin: 12px 0 0;
+.stat-section {
+  margin: 18px 0 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
-.admin-stats dt { color: var(--muted); font-size: 0.85rem; }
-.admin-stats dd { margin: 0; font-weight: 600; font-size: 0.85rem; }
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.stat-tile {
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  padding: 12px 14px;
+  min-width: 0;
+}
+.stat-value {
+  font-size: 1.3rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.stat-label { margin-top: 3px; font-size: 0.72rem; color: var(--muted); }
 .admin-config-grid {
   display: grid;
   grid-template-columns: 1fr minmax(0, 220px);

@@ -295,6 +295,29 @@ func (r *Registry) Len() int {
 	return len(r.byToken)
 }
 
+// Stats is an aggregate snapshot of the registry, for the admin dashboard.
+type Stats struct {
+	// Users is the number of identities held in memory.
+	Users int
+	// Named counts users who deliberately chose a display name.
+	Named int
+	// Migration counts users with account migration enabled.
+	Migration int
+}
+
+// Stats aggregates a snapshot over every resident identity.
+func (r *Registry) Stats() Stats {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	st := Stats{Users: len(r.byToken), Migration: len(r.byCode)}
+	for _, u := range r.byToken {
+		if u.Named {
+			st.Named++
+		}
+	}
+	return st
+}
+
 // ByUID returns the resident user with the given public UID, or nil. Intended
 // for occasional administrative lookups; it scans the registry.
 func (r *Registry) ByUID(uid string) *User {

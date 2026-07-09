@@ -1669,6 +1669,53 @@ func (h *Hub) ApplyLimits(l Limits) {
 	}
 }
 
+// Stats is an aggregate snapshot of the hub's resident (in-memory) state, for
+// the admin dashboard. Byte figures count content only (message text and file
+// payloads), not Go object overhead.
+type Stats struct {
+	// Channels is the number of live, non-dissolved channels.
+	Channels int
+	// Messages / Files / Announcements are resident entries across channels.
+	Messages      int
+	Files         int
+	Announcements int
+	// TextBytes / FileBytes are the resident content bytes across channels.
+	TextBytes int64
+	FileBytes int64
+	// Subscribers is the total number of live (SSE) connections.
+	Subscribers int
+	// Online is the total of each channel's distinct online users. One person
+	// present in two channels counts twice, mirroring the per-channel counter.
+	Online int
+}
+
+// Stats aggregates a snapshot over every live channel.
+func (h *Hub) Stats() Stats {
+	h.mu.Lock()
+	rooms := make([]*Room, 0, len(h.byKey))
+	for _, r := range h.byKey {
+		rooms = append(rooms, r)
+	}
+	h.mu.Unlock()
+
+	var st Stats
+	for _, r := range rooms {
+		r.mu.RLock()
+		if !r.dissolved {
+			st.Channels++
+			st.Messages += len(r.messages)
+			st.Files += len(r.files)
+			st.Announcements += len(r.announcements)
+			st.TextBytes += r.textBytes
+			st.FileBytes += r.fileBytes
+			st.Subscribers += len(r.subscribers)
+			st.Online += len(r.online)
+		}
+		r.mu.RUnlock()
+	}
+	return st
+}
+
 // CreatedBy returns how many active channels ownerUID currently owns.
 func (h *Hub) CreatedBy(ownerUID string) int {
 	h.mu.Lock()

@@ -311,6 +311,104 @@ func TestAdminRuntimeConfig(t *testing.T) {
 	}
 }
 
+// adminOverview is the dashboard payload shape used by the tests.
+type adminOverview struct {
+	Backend        string `json:"backend"`
+	UptimeSeconds  int64  `json:"uptimeSeconds"`
+	Channels       int    `json:"channels"`
+	Users          int    `json:"users"`
+	NamedUsers     int    `json:"namedUsers"`
+	MigrationUsers int    `json:"migrationUsers"`
+	Online         int    `json:"online"`
+	Connections    int    `json:"connections"`
+	Messages       int    `json:"messages"`
+	Files          int    `json:"files"`
+	Announcements  int    `json:"announcements"`
+	TextBytes      int64  `json:"textBytes"`
+	FileBytes      int64  `json:"fileBytes"`
+	ResidentBytes  int64  `json:"residentBytes"`
+	MemHeapBytes   uint64 `json:"memHeapBytes"`
+	MemSysBytes    uint64 `json:"memSysBytes"`
+	Goroutines     int    `json:"goroutines"`
+	Store          *struct {
+		Persistent bool  `json:"persistent"`
+		SizeBytes  int64 `json:"sizeBytes"`
+		Messages   int   `json:"messages"`
+		Files      int   `json:"files"`
+		FileBytes  int64 `json:"fileBytes"`
+	} `json:"store"`
+}
+
+func TestAdminOverviewDashboard(t *testing.T) {
+	s := newAdminServer(t, Options{})
+	c := newClient(t, s)
+
+	c.do("POST", "/api/me", "application/json", `{"name":"Alice"}`)
+	if rec := c.do("POST", "/api/messages/demo", "application/json", `{"text":"hello"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("seed message = %d", rec.Code)
+	}
+	if rec := uploadBytes(t, c, "demo", 10); rec.Code != http.StatusCreated {
+		t.Fatalf("seed upload = %d", rec.Code)
+	}
+
+	rec := adminDo(t, s, testAdminToken, "GET", "/api/admin/overview", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("overview = %d", rec.Code)
+	}
+	var ov adminOverview
+	if err := json.Unmarshal(rec.Body.Bytes(), &ov); err != nil {
+		t.Fatalf("decode overview: %v", err)
+	}
+
+	if ov.Backend != "memory" || ov.Channels != 1 || ov.Users != 1 || ov.NamedUsers != 1 {
+		t.Fatalf("overview basics = %+v", ov)
+	}
+	// One text message plus one file message, whose payload is resident.
+	if ov.Messages != 2 || ov.Files != 1 {
+		t.Fatalf("messages/files = %d/%d, want 2/1", ov.Messages, ov.Files)
+	}
+	if ov.FileBytes != 10 || ov.TextBytes != int64(len("hello")) || ov.ResidentBytes != ov.TextBytes+ov.FileBytes {
+		t.Fatalf("byte figures = text %d file %d resident %d", ov.TextBytes, ov.FileBytes, ov.ResidentBytes)
+	}
+	if ov.MemHeapBytes == 0 || ov.MemSysBytes == 0 || ov.Goroutines <= 0 {
+		t.Fatalf("process stats = heap %d sys %d goroutines %d", ov.MemHeapBytes, ov.MemSysBytes, ov.Goroutines)
+	}
+	if ov.UptimeSeconds < 0 {
+		t.Fatalf("uptime = %d", ov.UptimeSeconds)
+	}
+	// The memory backend reports no persistent store section.
+	if ov.Store != nil {
+		t.Fatalf("memory backend should omit store stats, got %+v", ov.Store)
+	}
+}
+
+func TestAdminOverviewStoreStats(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nekodrop.db")
+	store, err := storage.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	s := newAdminServer(t, Options{Store: store})
+	c := newClient(t, s)
+	c.do("POST", "/api/messages/demo", "application/json", `{"text":"durable"}`)
+	uploadBytes(t, c, "demo", 10)
+
+	rec := adminDo(t, s, testAdminToken, "GET", "/api/admin/overview", "")
+	var ov adminOverview
+	json.Unmarshal(rec.Body.Bytes(), &ov)
+	if ov.Store == nil || !ov.Store.Persistent {
+		t.Fatalf("sqlite backend should report store stats: %s", rec.Body.String())
+	}
+	if ov.Store.Messages != 2 || ov.Store.Files != 1 || ov.Store.FileBytes != 10 {
+		t.Fatalf("store stats = %+v, want 2 messages, 1 file, 10 bytes", ov.Store)
+	}
+	if ov.Store.SizeBytes <= 0 {
+		t.Fatalf("store size = %d, want > 0", ov.Store.SizeBytes)
+	}
+}
+
 func TestAdminStatePersistsAcrossRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nekodrop.db")
 	store, err := storage.Open("sqlite", path)
