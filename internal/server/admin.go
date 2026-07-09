@@ -447,8 +447,10 @@ func (s *Server) handleAdminPatchUser(w http.ResponseWriter, r *http.Request) {
 	a.mu.Unlock()
 
 	// The user may not be resident in memory (evicted or never seen); report
-	// their standing regardless, since bans are keyed by UID alone.
-	target := user.User{UID: uid, Name: user.DefaultName}
+	// their standing regardless, since bans are keyed by UID alone. The empty
+	// name marks the account as deleted/unknown; clients render it as a
+	// localized placeholder.
+	target := user.User{UID: uid}
 	if u := s.users.ByUID(uid); u != nil {
 		target = *u
 	}

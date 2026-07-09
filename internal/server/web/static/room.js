@@ -114,20 +114,26 @@
       encodeURIComponent(fileId) + (inline ? "?inline=1" : "");
   }
 
-  // nameText renders a user's display name: the name they chose, or a localized
-  // "guest" placeholder when they are unnamed (the server sends an empty name
-  // for the auto-assigned default). A name a user actually typed — even the word
-  // "Guest" — is shown verbatim and never translated.
+  // nameText renders a user's display name. Every live user carries a real
+  // name (auto-generated at first sight when they never chose one), so names
+  // are shown verbatim and never translated. An empty name means the account
+  // could not be resolved (evicted/deleted); that system case is rendered as a
+  // localized placeholder.
   function nameText(name) {
-    return name && String(name).trim() ? name : t("name.guest");
+    return name && String(name).trim() ? name : t("name.deleted");
   }
-  // label is the canonical "name#uid" rendering, localizing the guest case.
+  // label is the canonical "name#uid" rendering, localizing the deleted case.
   function label(name, uid) {
     return nameText(name) + (uid ? "#" + uid : "");
   }
 
+  // Track everyone who appears, including accounts whose name is unresolvable
+  // (stored as "") — they must still be mentionable and relabel correctly.
+  // Messages replay oldest→newest, so last write wins with the current name.
   function remember(uid, name) {
-    if (uid && name && participants.get(uid) !== name) {
+    if (!uid) return;
+    name = name || "";
+    if (participants.get(uid) !== name) {
       participants.set(uid, name);
       relabel(uid, name);
     }
@@ -138,7 +144,7 @@
   // — their authored messages, @-mentions of them, and reply snippets — so the
   // whole history reflects the new name rather than the one captured at send.
   function relabel(uid, name) {
-    if (!uid || !name) return;
+    if (!uid) return; // an empty name is valid: label() renders its placeholder
     document.querySelectorAll('.who[data-uid="' + cssEscape(uid) + '"]').forEach((el) => {
       el.textContent = label(name, uid);
     });
@@ -206,9 +212,12 @@
       span.className = "mention";
       span.dataset.uid = m[1];
       // Render the mentioned user's current display name when known, so renaming
-      // updates past mentions; fall back to the literal text otherwise.
-      const known = participants.get(m[1]);
-      span.textContent = known ? "@" + known + "#" + m[1] : m[0];
+      // updates past mentions; fall back to the literal text otherwise. has()
+      // matters: a deleted account is known with an empty name and renders as
+      // its localized placeholder.
+      span.textContent = participants.has(m[1])
+        ? "@" + label(participants.get(m[1]), m[1])
+        : m[0];
       if (m[1] === me.uid) {
         span.classList.add("mention-self");
         mentionsMe = true;
@@ -716,7 +725,10 @@
     const matches = [];
     participants.forEach((name, uid) => {
       if (uid === me.uid) return;
-      if (!query || name.toLowerCase().includes(query) || uid.includes(query)) {
+      // Match against the rendered name so accounts shown under a localized
+      // placeholder (deleted) are still findable by what the user sees.
+      const shown = nameText(name).toLowerCase();
+      if (!query || shown.includes(query) || uid.includes(query)) {
         matches.push({ uid, name });
       }
     });
@@ -1524,7 +1536,12 @@
       head.className = "member-head";
       const name = document.createElement("span");
       name.className = "member-name";
-      name.textContent = label(m.name, m.uid);
+      // A roster entry with no resolvable name is a deleted account — or, when
+      // that entry carries a ban, a banned account. Both are localized system
+      // placeholders; real names render verbatim.
+      name.textContent = m.name
+        ? m.name + "#" + m.uid
+        : t(m.banned ? "name.banned" : "name.deleted") + "#" + m.uid;
       head.appendChild(name);
       if (m.owner) head.appendChild(badge("mod.owner", "owner"));
       else if (m.admin) head.appendChild(badge("mod.admin_badge", "admin"));
@@ -1580,8 +1597,8 @@
     }
   });
 
-  // Re-apply every rendered name so switching language updates unnamed "guest"
-  // labels too (named users are already handled by relabel()/identity events).
+  // Re-apply every rendered name so switching language updates the localized
+  // placeholder (deleted-account) labels; real names are unaffected.
   function relocalizeNames() {
     document.querySelectorAll('.who[data-uid]').forEach((el) => {
       el.textContent = label(participants.get(el.dataset.uid), el.dataset.uid);
@@ -1591,7 +1608,11 @@
       if (w) w.textContent = label(participants.get(q.dataset.uid), q.dataset.uid);
     });
     document.querySelectorAll('.mention[data-uid]').forEach((el) => {
-      if (!participants.get(el.dataset.uid)) return; // keep literal typed mention
+      // Only known participants re-render; a mention of a UID this client has
+      // never resolved keeps its literal typed text.
+      if (participants.has(el.dataset.uid)) {
+        el.textContent = "@" + label(participants.get(el.dataset.uid), el.dataset.uid);
+      }
     });
     if (replyTarget && replyTarget.uid && !els.replyBar.hidden) {
       els.replyWho.textContent = label(participants.get(replyTarget.uid), replyTarget.uid);
@@ -1614,9 +1635,9 @@
       const res = await api("/api/me");
       if (res.ok) {
         me = await res.json();
-        // Only remember a deliberately chosen name; an unnamed visitor keeps the
-        // localized guest placeholder rather than a baked-in default word.
-        if (me.named) remember(me.uid, me.name);
+        // The server always sends a real name (auto-generated when the visitor
+        // never chose one), so it can be remembered unconditionally.
+        remember(me.uid, me.name);
       }
     } catch (e) { /* ignore */ }
   }

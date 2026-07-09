@@ -105,17 +105,16 @@
   // --- Identity ---
   function renderMe() {
     if (!me) return;
-    // An unnamed visitor keeps the auto-assigned default; render it as a
-    // localized "guest" word rather than the literal name from the server, but
-    // never translate a name the visitor deliberately chose.
-    const shown = me.named ? me.name : t("name.guest");
-    meLabel.textContent = shown + "#" + me.uid;
+    // Every visitor has a real name — auto-generated at first sight when they
+    // never chose one. Names render verbatim; the hint marks auto-generated
+    // ones so the visitor knows they can pick their own.
+    meLabel.textContent = me.name + "#" + me.uid;
     meGuest.hidden = !!me.named;
     meLabel.classList.toggle("is-guest", !me.named);
-    // Reflect the current chosen name in the editor; leave it empty for guests
-    // so the localized placeholder shows through.
+    // Reflect the current name in the editor so it is transparent what saving
+    // would keep; skip while the visitor is typing.
     if (nameInput && document.activeElement !== nameInput) {
-      nameInput.value = me.named ? me.name : "";
+      nameInput.value = me.name || "";
     }
   }
 
@@ -276,12 +275,12 @@
       renderMe();
       // Sync the name box to the adopted account so a later join/create does
       // not silently rename it to this browser's previously saved name.
-      nameInput.value = me.named ? me.name : "";
+      nameInput.value = me.name || "";
       saveName();
       migrateInput.value = "";
       migration = null; // the adopted account's own status; reload lazily
       if (migrateBox.open) await loadMigration();
-      migrateDone.textContent = t("landing.migrate_done", { name: (me.named ? me.name : t("name.guest")) + "#" + me.uid });
+      migrateDone.textContent = t("landing.migrate_done", { name: me.name + "#" + me.uid });
       migrateDone.hidden = false;
       loadChannels(); // "your/joined channels" now reflect the adopted account
     } catch (err) {
@@ -389,9 +388,17 @@
 
   // The directory refreshes itself: a steady poll keeps online counts and new
   // channels current without a manual button.
-  loadMe();
-  loadChannels();
-  setInterval(loadChannels, 4000);
+  //
+  // On a first visit the identity cookie does not exist yet, and every API call
+  // without it mints a fresh identity. Await loadMe() before anything else so
+  // exactly one identity is created; firing loadChannels() in parallel used to
+  // race two cookie-less requests and leave the visitor with a different UID
+  // than the one shown in "You are …".
+  (async function bootstrap() {
+    await loadMe();
+    loadChannels();
+    setInterval(loadChannels, 4000);
+  })();
 
   // Re-render language-dependent dynamic text when the language changes.
   document.addEventListener("nekodrop:langchange", function () {

@@ -4,17 +4,18 @@ import (
 	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/moehoshio/NekoDrop/internal/room"
 	"github.com/moehoshio/NekoDrop/internal/storage"
 )
 
-// TestDefaultNameIsGuestAndDistinct verifies that a never-named visitor is
-// reported as unnamed with an empty wire name (so the client can render a
-// localized "guest" placeholder), and that naming flips the Named flag and
-// sends the chosen name verbatim.
-func TestDefaultNameIsGuestAndDistinct(t *testing.T) {
+// TestAutoNameIsGeneratedAndDistinct verifies that a never-named visitor gets
+// a generated display name (marked Named=false so the UI can invite them to
+// pick their own), and that choosing a name flips the flag and travels
+// verbatim.
+func TestAutoNameIsGeneratedAndDistinct(t *testing.T) {
 	s := newTestServer(t)
 	c := newClient(t, s)
 
@@ -24,8 +25,8 @@ func TestDefaultNameIsGuestAndDistinct(t *testing.T) {
 		Named bool   `json:"named"`
 	}
 	json.Unmarshal(rec.Body.Bytes(), &me)
-	if me.Name != "" || me.Named {
-		t.Fatalf("unnamed visitor = %+v, want {\"\" false}", me)
+	if me.Name == "" || me.Named {
+		t.Fatalf("unnamed visitor = %+v, want a generated name and named=false", me)
 	}
 
 	// Deliberately choosing "anonymous" is a named state, distinct from default.
@@ -33,6 +34,47 @@ func TestDefaultNameIsGuestAndDistinct(t *testing.T) {
 	json.Unmarshal(rec.Body.Bytes(), &me)
 	if me.Name != "anonymous" || !me.Named {
 		t.Fatalf("named visitor = %+v, want {anonymous true}", me)
+	}
+}
+
+// TestStaticAssetCacheBusting verifies that HTML pages reference their static
+// assets through versioned URLs and are never cached without revalidation,
+// while the versioned assets themselves are immutable. This is what prevents a
+// browser from pairing a stale cached script with a newer page after a server
+// upgrade (which previously surfaced raw i18n keys).
+func TestStaticAssetCacheBusting(t *testing.T) {
+	s := newTestServer(t)
+	c := newClient(t, s)
+
+	rec := c.do("GET", "/", "", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET / = %d", rec.Code)
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-cache" {
+		t.Fatalf("page Cache-Control = %q, want no-cache", cc)
+	}
+	body := rec.Body.String()
+	want := `/static/i18n.js?v=` + s.staticVer
+	if !strings.Contains(body, want) {
+		t.Fatalf("page does not reference versioned asset %q", want)
+	}
+	if strings.Contains(body, `src="/static/i18n.js"`) {
+		t.Fatal("page still references an unversioned script URL")
+	}
+
+	// The versioned asset is immutable; the bare URL must revalidate.
+	rec = c.do("GET", "/static/i18n.js?v="+s.staticVer, "", "")
+	if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "immutable") {
+		t.Fatalf("versioned asset Cache-Control = %q, want immutable", cc)
+	}
+	rec = c.do("GET", "/static/i18n.js", "", "")
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-cache" {
+		t.Fatalf("unversioned asset Cache-Control = %q, want no-cache", cc)
+	}
+	// A stale version string (an old build's URL) must not be cached forever.
+	rec = c.do("GET", "/static/i18n.js?v=stale123", "", "")
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-cache" {
+		t.Fatalf("stale-versioned asset Cache-Control = %q, want no-cache", cc)
 	}
 }
 
@@ -68,21 +110,26 @@ func TestOwnedChannelsListed(t *testing.T) {
 	}
 }
 
-// TestGuestMessageSenderIsEmpty verifies that an unnamed visitor's messages
-// carry an empty sender (the client renders a localized "guest" placeholder),
-// while a chosen name travels with the message verbatim.
-func TestGuestMessageSenderIsEmpty(t *testing.T) {
+// TestMessageSenderCarriesName verifies that every message carries its
+// sender's current display name — the auto-generated one for visitors who
+// never chose a name, or the chosen name verbatim.
+func TestMessageSenderCarriesName(t *testing.T) {
 	s := newTestServer(t)
 
-	guest := newClient(t, s)
-	rec := guest.do("POST", "/api/messages/room-x", "application/json", `{"text":"hi"}`)
+	auto := newClient(t, s)
+	rec := auto.do("GET", "/api/me", "", "")
+	var me struct {
+		Name string `json:"name"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &me)
+	rec = auto.do("POST", "/api/messages/room-x", "application/json", `{"text":"hi"}`)
 	if rec.Code != http.StatusCreated {
-		t.Fatalf("guest post = %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("auto-named post = %d: %s", rec.Code, rec.Body.String())
 	}
 	var m room.Message
 	json.Unmarshal(rec.Body.Bytes(), &m)
-	if m.Sender != "" {
-		t.Fatalf("guest sender = %q, want empty", m.Sender)
+	if m.Sender == "" || m.Sender != me.Name {
+		t.Fatalf("auto-named sender = %q, want the generated name %q", m.Sender, me.Name)
 	}
 
 	named := newClient(t, s)

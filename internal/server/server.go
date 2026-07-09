@@ -6,7 +6,9 @@
 package server
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -72,6 +74,14 @@ type Server struct {
 	store  storage.Store
 	admin  *adminPanel
 
+	// staticVer is a content hash of the embedded static assets; pages holds
+	// the HTML pages with their asset references rewritten to versioned URLs.
+	// Together they cache-bust browsers across server upgrades: a new build
+	// changes the URLs, so stale cached JavaScript can never run against a
+	// newer backend (which previously left raw i18n keys on screen).
+	staticVer string
+	pages     map[string][]byte
+
 	// Base configuration as resolved from file/env/flags. The admin panel's
 	// runtime overrides layer on top of these (see admin.go).
 	baseMaxUpload          int64
@@ -111,10 +121,46 @@ func New(opts Options) (*Server, error) {
 		baseMaxUsers:           opts.MaxUsers,
 		startTime:              time.Now(),
 	}
+	s.staticVer = staticAssetVersion(static)
+	s.pages = renderPages(static, s.staticVer)
 	// Re-apply any persisted runtime overrides from a previous run.
 	s.applyRuntimeConfig()
 	s.routes()
 	return s, nil
+}
+
+// staticAssetVersion hashes every embedded static asset into a short version
+// string. Deterministic per build: fs.WalkDir walks lexically.
+func staticAssetVersion(static fs.FS) string {
+	h := sha256.New()
+	_ = fs.WalkDir(static, "static", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if data, readErr := fs.ReadFile(static, path); readErr == nil {
+			h.Write([]byte(path))
+			h.Write(data)
+		}
+		return nil
+	})
+	return hex.EncodeToString(h.Sum(nil))[:12]
+}
+
+// staticRefRe matches src/href references to static assets in the HTML pages.
+var staticRefRe = regexp.MustCompile(`(src|href)="/static/([^"?]+)"`)
+
+// renderPages rewrites each HTML page's static asset references to versioned
+// URLs (/static/x.js?v=<hash>) so browsers refetch assets after an upgrade.
+func renderPages(static fs.FS, ver string) map[string][]byte {
+	pages := make(map[string][]byte, 3)
+	for _, name := range []string{"index.html", "room.html", "admin.html"} {
+		data, err := fs.ReadFile(static, name)
+		if err != nil {
+			continue
+		}
+		pages[name] = []byte(staticRefRe.ReplaceAllString(string(data), `$1="/static/$2?v=`+ver+`"`))
+	}
+	return pages
 }
 
 // ServeHTTP implements http.Handler.
@@ -248,27 +294,16 @@ func (s *Server) resolveSender(w http.ResponseWriter, r *http.Request, name stri
 	return u
 }
 
-// wireName is the display name attached to a user's messages, announcements and
-// roster entries. It is the name the user deliberately chose, or an empty string
-// while they are still on the auto-assigned default. Clients render the empty
-// case as a localized "guest" placeholder, so the default name is translated per
-// UI language — without ever translating a name a user actually typed, even if
-// they literally chose "Guest".
-func wireName(u *user.User) string {
-	if u == nil || !u.Named {
-		return ""
-	}
-	return u.Name
-}
-
 // meJSON is the identity payload returned by the /api/me endpoints. It exposes
-// whether account migration is enabled but never the codes themselves.
+// whether account migration is enabled but never the codes themselves. Every
+// user has a real name — auto-generated at first sight when they never chose
+// one (Named reports which) — so names travel verbatim; only unresolvable
+// accounts (deleted/banned) are rendered as localized placeholders, and that
+// happens client-side off an empty name.
 func (s *Server) meJSON(u *user.User) map[string]any {
 	return map[string]any{
-		"uid": u.UID,
-		// An unnamed visitor's name is sent empty so the client renders a
-		// localized "guest" placeholder; a chosen name is sent verbatim.
-		"name":      wireName(u),
+		"uid":       u.UID,
+		"name":      u.Name,
 		"named":     u.Named,
 		"migration": s.users.MigrationCode(u.Token) != "",
 	}
@@ -365,20 +400,36 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(name, ".js"):
 		ctype = "text/javascript; charset=utf-8"
 	}
+	// Assets requested through the versioned URLs the pages emit are immutable:
+	// any content change produces a different URL, so they may be cached
+	// forever. Anything else must be revalidated.
+	if r.URL.Query().Get("v") == s.staticVer {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	}
 	s.serveFile(w, r, "static/"+name, ctype)
 }
 
 func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, name, ctype string) {
-	data, err := fs.ReadFile(s.static, name)
-	if err != nil {
-		http.NotFound(w, r)
-		return
+	data, ok := s.pages[name]
+	if !ok {
+		var err error
+		data, err = fs.ReadFile(s.static, name)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
 	}
 	if ctype != "" {
 		w.Header().Set("Content-Type", ctype)
 	}
 	if strings.HasPrefix(ctype, "text/html") {
 		w.Header().Set("Content-Security-Policy", pageCSP)
+	}
+	// Never let a browser serve this response from cache without revalidating:
+	// pairing a cached script with a newer page (or vice versa) breaks the UI.
+	// Versioned static assets opt out above with an immutable lifetime.
+	if w.Header().Get("Cache-Control") == "" {
+		w.Header().Set("Cache-Control", "no-cache")
 	}
 	_, _ = w.Write(data)
 }
@@ -613,7 +664,7 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, bannedChannelMsg, http.StatusForbidden)
 		return
 	}
-	pending, err := rm.Join(u.UID, wireName(u))
+	pending, err := rm.Join(u.UID, u.Name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
@@ -689,7 +740,7 @@ func (s *Server) handleAnnounce(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	text = clampRunes(text, maxAnnouncementRunes)
-	a := rm.AddAnnouncement(u.UID, wireName(u), text)
+	a := rm.AddAnnouncement(u.UID, u.Name, text)
 	writeJSON(w, http.StatusCreated, a)
 }
 
@@ -909,7 +960,7 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	// to the global name. Messages are keyed by UID, so a later nickname change
 	// retroactively relabels this user's history. Nicknames pass through the same
 	// sanitizer as global names (length cap, no smuggled whitespace).
-	display := rm.ApplyNick(u.UID, wireName(u), user.SanitizeName(req.Nick))
+	display := rm.ApplyNick(u.UID, u.Name, user.SanitizeName(req.Nick))
 	m := rm.AddText(display, u.UID, text, parseMentions(text), req.Preview, req.ReplyTo)
 	writeJSON(w, http.StatusCreated, m)
 }
@@ -1020,7 +1071,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	caption := clampRunes(strings.TrimSpace(r.FormValue("text")), maxMessageRunes)
 	preview := r.FormValue("preview") == "1" || r.FormValue("preview") == "true"
 
-	display := rm.ApplyNick(u.UID, wireName(u), user.SanitizeName(r.FormValue("nick")))
+	display := rm.ApplyNick(u.UID, u.Name, user.SanitizeName(r.FormValue("nick")))
 	m := rm.AddFile(display, u.UID, name, ctype, data, caption, parseMentions(caption), preview, r.FormValue("replyTo"))
 	writeJSON(w, http.StatusCreated, m)
 }
