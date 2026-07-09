@@ -502,6 +502,23 @@ body.room {
   font-size: 0.85rem;
 }
 .pill-button:disabled { opacity: 0.6; cursor: default; }
+
+/* The header Join button is a membership call-to-action, a different intent
+   from Send (post a message). Give it its own look: an outlined accent pill
+   (accent border + accent label on the neutral glass) that fills in on hover,
+   so the two primary pills never read as the same button. */
+#join-btn.pill-button {
+  background: var(--control-bg);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  box-shadow: inset 0 1px 0 var(--glass-hi);
+}
+#join-btn.pill-button:hover:not(:disabled) {
+  background: var(--btn-bg-hover);
+  color: var(--btn-fg);
+  border-color: var(--btn-border);
+  filter: none;
+}
 .notify-count {
   position: absolute;
   top: -6px;
