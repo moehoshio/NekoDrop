@@ -8,6 +8,8 @@ coverage.txt
 
 # Local config & SQLite databases
 /config.json
+/config.yaml
+/config.yml
 *.db
 *.db-wal
 *.db-shm

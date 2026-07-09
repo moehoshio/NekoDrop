@@ -391,6 +391,13 @@ func (s *sqlStore) AppendAnnouncement(a Announcement) error {
 	return err
 }
 
+func (s *sqlStore) DeleteAnnouncement(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`DELETE FROM announcements WHERE id = ?`, id)
+	return err
+}
+
 // --- Key-value settings ---
 
 func (s *sqlStore) LoadKV(key string) (string, bool, error) {

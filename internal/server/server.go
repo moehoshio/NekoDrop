@@ -181,6 +181,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/channels/{room}/leave", s.handleLeave)
 	s.mux.HandleFunc("POST /api/channels/{room}/moderate", s.handleModerate)
 	s.mux.HandleFunc("POST /api/channels/{room}/announcements", s.handleAnnounce)
+	s.mux.HandleFunc("PATCH /api/channels/{room}/announcements/{id}", s.handleEditAnnouncement)
+	s.mux.HandleFunc("DELETE /api/channels/{room}/announcements/{id}", s.handleDeleteAnnouncement)
 
 	// Messaging & files.
 	s.mux.HandleFunc("GET /api/stream/{room}", s.handleStream)
@@ -246,12 +248,27 @@ func (s *Server) resolveSender(w http.ResponseWriter, r *http.Request, name stri
 	return u
 }
 
+// wireName is the display name attached to a user's messages, announcements and
+// roster entries. It is the name the user deliberately chose, or an empty string
+// while they are still on the auto-assigned default. Clients render the empty
+// case as a localized "guest" placeholder, so the default name is translated per
+// UI language — without ever translating a name a user actually typed, even if
+// they literally chose "Guest".
+func wireName(u *user.User) string {
+	if u == nil || !u.Named {
+		return ""
+	}
+	return u.Name
+}
+
 // meJSON is the identity payload returned by the /api/me endpoints. It exposes
 // whether account migration is enabled but never the codes themselves.
 func (s *Server) meJSON(u *user.User) map[string]any {
 	return map[string]any{
-		"uid":       u.UID,
-		"name":      u.Name,
+		"uid": u.UID,
+		// An unnamed visitor's name is sent empty so the client renders a
+		// localized "guest" placeholder; a chosen name is sent verbatim.
+		"name":      wireName(u),
 		"named":     u.Named,
 		"migration": s.users.MigrationCode(u.Token) != "",
 	}
@@ -596,7 +613,7 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, bannedChannelMsg, http.StatusForbidden)
 		return
 	}
-	pending, err := rm.Join(u.UID, u.Name)
+	pending, err := rm.Join(u.UID, wireName(u))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
@@ -672,8 +689,56 @@ func (s *Server) handleAnnounce(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	text = clampRunes(text, maxAnnouncementRunes)
-	a := rm.AddAnnouncement(u.UID, u.Name, text)
+	a := rm.AddAnnouncement(u.UID, wireName(u), text)
 	writeJSON(w, http.StatusCreated, a)
+}
+
+// handleEditAnnouncement lets an owner or admin rewrite an announcement.
+func (s *Server) handleEditAnnouncement(w http.ResponseWriter, r *http.Request) {
+	rm, u, ok := s.lookupForAction(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Text string `json:"text"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	text := strings.TrimSpace(req.Text)
+	if text == "" {
+		http.Error(w, "announcement text is required", http.StatusBadRequest)
+		return
+	}
+	text = clampRunes(text, maxAnnouncementRunes)
+	a, err := rm.EditAnnouncement(u.UID, r.PathValue("id"), text)
+	if err != nil {
+		status := http.StatusForbidden
+		if err == room.ErrAnnouncementNotFound {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	writeJSON(w, http.StatusOK, a)
+}
+
+// handleDeleteAnnouncement lets an owner or admin remove an announcement.
+func (s *Server) handleDeleteAnnouncement(w http.ResponseWriter, r *http.Request) {
+	rm, u, ok := s.lookupForAction(w, r)
+	if !ok {
+		return
+	}
+	if err := rm.DeleteAnnouncement(u.UID, r.PathValue("id")); err != nil {
+		status := http.StatusForbidden
+		if err == room.ErrAnnouncementNotFound {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // lookupForAction resolves the channel for a moderation/settings action. It
@@ -844,7 +909,7 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	// to the global name. Messages are keyed by UID, so a later nickname change
 	// retroactively relabels this user's history. Nicknames pass through the same
 	// sanitizer as global names (length cap, no smuggled whitespace).
-	display := rm.ApplyNick(u.UID, u.Name, user.SanitizeName(req.Nick))
+	display := rm.ApplyNick(u.UID, wireName(u), user.SanitizeName(req.Nick))
 	m := rm.AddText(display, u.UID, text, parseMentions(text), req.Preview, req.ReplyTo)
 	writeJSON(w, http.StatusCreated, m)
 }
@@ -955,7 +1020,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	caption := clampRunes(strings.TrimSpace(r.FormValue("text")), maxMessageRunes)
 	preview := r.FormValue("preview") == "1" || r.FormValue("preview") == "true"
 
-	display := rm.ApplyNick(u.UID, u.Name, user.SanitizeName(r.FormValue("nick")))
+	display := rm.ApplyNick(u.UID, wireName(u), user.SanitizeName(r.FormValue("nick")))
 	m := rm.AddFile(display, u.UID, name, ctype, data, caption, parseMentions(caption), preview, r.FormValue("replyTo"))
 	writeJSON(w, http.StatusCreated, m)
 }

@@ -63,12 +63,15 @@ type Message struct {
 	Time      time.Time   `json:"time"`
 }
 
-// Announcement is a pinned notice posted by a channel owner or admin.
+// Announcement is a pinned notice posted by a channel owner or admin. Several
+// may coexist, and each can be edited or removed like a special, persistent
+// message.
 type Announcement struct {
 	ID         string    `json:"id"`
 	AuthorUID  string    `json:"authorUid"`
 	AuthorName string    `json:"authorName"`
 	Text       string    `json:"text"`
+	Edited     bool      `json:"edited,omitempty"`
 	Time       time.Time `json:"time"`
 }
 
@@ -93,6 +96,10 @@ const (
 	EventPresence EventKind = "presence"
 	// EventAnnouncement carries a newly posted announcement.
 	EventAnnouncement EventKind = "announcement"
+	// EventAnnouncementEdited carries the new content of an edited announcement.
+	EventAnnouncementEdited EventKind = "announcement_edited"
+	// EventAnnouncementDeleted reports that an announcement was removed.
+	EventAnnouncementDeleted EventKind = "announcement_deleted"
 	// EventChannel reports a change to channel metadata or settings.
 	EventChannel EventKind = "channel"
 	// EventDissolved signals that the channel has been dissolved.
@@ -120,14 +127,15 @@ type Identity struct {
 // Event is a single real-time update delivered over the subscription channel.
 // Exactly one of the payload fields is populated, selected by Type.
 type Event struct {
-	Type         EventKind     `json:"type"`
-	Message      *Message      `json:"message,omitempty"`
-	Online       int           `json:"online,omitempty"`
-	Announcement *Announcement `json:"announcement,omitempty"`
-	Channel      *Info         `json:"channel,omitempty"`
-	Identity     *Identity     `json:"identity,omitempty"`
-	MessageID    string        `json:"messageId,omitempty"`
-	PurgedUID    string        `json:"purgedUid,omitempty"`
+	Type           EventKind     `json:"type"`
+	Message        *Message      `json:"message,omitempty"`
+	Online         int           `json:"online,omitempty"`
+	Announcement   *Announcement `json:"announcement,omitempty"`
+	Channel        *Info         `json:"channel,omitempty"`
+	Identity       *Identity     `json:"identity,omitempty"`
+	MessageID      string        `json:"messageId,omitempty"`
+	AnnouncementID string        `json:"announcementId,omitempty"`
+	PurgedUID      string        `json:"purgedUid,omitempty"`
 }
 
 // Settings is the mutable, owner-controlled configuration of a channel.
@@ -168,6 +176,8 @@ var (
 	ErrChannelNotFound = errors.New("channel not found")
 	// ErrMessageNotFound is returned when a requested message does not exist.
 	ErrMessageNotFound = errors.New("message not found")
+	// ErrAnnouncementNotFound is returned when a requested announcement does not exist.
+	ErrAnnouncementNotFound = errors.New("announcement not found")
 	// ErrLimitReached is returned when an owner hits their channel quota.
 	ErrLimitReached = errors.New("channel creation limit reached")
 )
@@ -971,6 +981,74 @@ func (r *Room) AddAnnouncement(authorUID, authorName, text string) Announcement 
 	return a
 }
 
+// EditAnnouncement rewrites the text of an existing announcement and broadcasts
+// the update. Only a channel owner or admin (the same standing required to post
+// one) may edit announcements; the author and post time are preserved.
+func (r *Room) EditAnnouncement(actorUID, id, text string) (Announcement, error) {
+	r.mu.Lock()
+	if !r.isAdmin(actorUID) {
+		r.mu.Unlock()
+		return Announcement{}, errors.New("only the owner or an admin can edit announcements")
+	}
+	idx := -1
+	for i := range r.announcements {
+		if r.announcements[i].ID == id {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		r.mu.Unlock()
+		return Announcement{}, ErrAnnouncementNotFound
+	}
+	a := r.announcements[idx]
+	a.Text = text
+	a.Edited = true
+	r.announcements[idx] = a
+	r.lastActive = time.Now()
+	r.mu.Unlock()
+
+	if r.store != nil {
+		// AppendAnnouncement is a REPLACE keyed by ID, so it doubles as an update.
+		_ = r.store.AppendAnnouncement(storage.Announcement{
+			ID: a.ID, ChannelID: r.ID, AuthorUID: a.AuthorUID,
+			AuthorName: a.AuthorName, Text: a.Text, Time: a.Time,
+		})
+	}
+	r.broadcast(Event{Type: EventAnnouncementEdited, Announcement: &a})
+	return a, nil
+}
+
+// DeleteAnnouncement removes a single announcement and broadcasts the deletion.
+// Only a channel owner or admin may remove announcements.
+func (r *Room) DeleteAnnouncement(actorUID, id string) error {
+	r.mu.Lock()
+	if !r.isAdmin(actorUID) {
+		r.mu.Unlock()
+		return errors.New("only the owner or an admin can remove announcements")
+	}
+	idx := -1
+	for i := range r.announcements {
+		if r.announcements[i].ID == id {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		r.mu.Unlock()
+		return ErrAnnouncementNotFound
+	}
+	r.announcements = append(r.announcements[:idx], r.announcements[idx+1:]...)
+	r.lastActive = time.Now()
+	r.mu.Unlock()
+
+	if r.store != nil {
+		_ = r.store.DeleteAnnouncement(id)
+	}
+	r.broadcast(Event{Type: EventAnnouncementDeleted, AnnouncementID: id})
+	return nil
+}
+
 // --- Membership & moderation ---
 
 // Join adds uid as a member. When the channel requires approval, the request is
@@ -1159,13 +1237,11 @@ func (r *Room) Members() []Member {
 
 	out := make([]Member, 0, len(seen))
 	for uid := range seen {
-		name := r.names[uid]
-		if name == "" {
-			name = "user"
-		}
+		// An empty name marks an unnamed guest; the client renders it as a
+		// localized placeholder rather than a baked-in default word.
 		out = append(out, Member{
 			UID:    uid,
-			Name:   name,
+			Name:   r.names[uid],
 			Owner:  r.isOwner(uid),
 			Admin:  r.isAdmin(uid),
 			Member: r.isMember(uid),

@@ -307,7 +307,9 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     }).catch(() => null);
-    if (!res || !res.ok) window.alert(res ? (await res.text()).trim() || t("admin.err") : t("admin.err"));
+    if (!res || !res.ok) {
+      await NekoUI.alert({ title: t("admin.err"), body: res ? (await res.text()).trim() || t("admin.err") : t("admin.err"), confirmLabel: t("ui.confirm") });
+    }
     await Promise.all([loadChannels(), refreshOverview()]);
   }
 
@@ -388,7 +390,9 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     }).catch(() => null);
-    if (!res || !res.ok) window.alert(res ? (await res.text()).trim() || t("admin.err") : t("admin.err"));
+    if (!res || !res.ok) {
+      await NekoUI.alert({ title: t("admin.err"), body: res ? (await res.text()).trim() || t("admin.err") : t("admin.err"), confirmLabel: t("ui.confirm") });
+    }
     await Promise.all([loadUsers(), refreshOverview()]);
   }
 

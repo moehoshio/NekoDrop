@@ -140,9 +140,11 @@ type Store interface {
 	SaveFile(File) error
 	DeleteFile(id string) error
 
-	// Announcements.
+	// Announcements. AppendAnnouncement inserts or replaces by ID, so it also
+	// serves as an update; DeleteAnnouncement removes a single announcement.
 	LoadAnnouncements(channelID string) ([]Announcement, error)
 	AppendAnnouncement(Announcement) error
+	DeleteAnnouncement(id string) error
 
 	// Key-value settings. LoadKV reports whether the key exists; SaveKV
 	// overwrites any previous value. Used for small server-side state such as
@@ -197,6 +199,7 @@ func (*Memory) SaveFile(File) error                              { return nil }
 func (*Memory) DeleteFile(string) error                          { return nil }
 func (*Memory) LoadAnnouncements(string) ([]Announcement, error) { return nil, nil }
 func (*Memory) AppendAnnouncement(Announcement) error            { return nil }
+func (*Memory) DeleteAnnouncement(string) error                  { return nil }
 func (*Memory) LoadKV(string) (string, bool, error)              { return "", false, nil }
 func (*Memory) SaveKV(string, string) error                      { return nil }
 func (*Memory) Stats() (Stats, error)                            { return Stats{}, nil }

@@ -5,6 +5,8 @@
   const t = (k, v) => (window.NekoI18n ? window.NekoI18n.t(k, v) : k);
 
   const form = document.getElementById("join-form");
+  const nameForm = document.getElementById("name-form");
+  const nameSaved = document.getElementById("name-saved");
   const codeInput = document.getElementById("code");
   const nameInput = document.getElementById("name");
   const randomButton = document.getElementById("random");
@@ -48,22 +50,37 @@
     }
   }
 
-  // Persist the chosen name to the server so the UID-bound identity is updated
-  // before navigating into a channel.
+  // Persist the chosen global name to the server, updating the UID-bound
+  // identity. Setting a name is now its own explicit action, decoupled from
+  // joining or creating a channel: those use whatever name is already set.
   async function commitName() {
     const name = nameInput.value.trim();
-    if (!name) return;
     saveName();
     try {
-      await fetch("/api/me", {
+      const res = await fetch("/api/me", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name }),
       });
+      if (res.ok) {
+        me = await res.json();
+        renderMe();
+      }
     } catch (e) {
       /* best effort */
     }
   }
+
+  // The name form sets the global name and confirms it, without navigating.
+  nameForm.addEventListener("submit", async function (e) {
+    e.preventDefault();
+    await commitName();
+    if (nameSaved) {
+      nameSaved.textContent = t("landing.name_saved");
+      nameSaved.hidden = false;
+      setTimeout(() => { nameSaved.hidden = true; }, 2000);
+    }
+  });
 
   async function go(code) {
     const slug = slugify(code);
@@ -71,7 +88,6 @@
       codeInput.focus();
       return;
     }
-    await commitName();
     window.location.href = "/r/" + encodeURIComponent(slug);
   }
 
@@ -89,12 +105,22 @@
   // --- Identity ---
   function renderMe() {
     if (!me) return;
-    meLabel.textContent = me.name + "#" + me.uid;
-    // An unnamed visitor keeps the default name; flag that distinctly so it is
-    // never confused with someone who deliberately chose a name.
+    // An unnamed visitor keeps the auto-assigned default; render it as a
+    // localized "guest" word rather than the literal name from the server, but
+    // never translate a name the visitor deliberately chose.
+    const shown = me.named ? me.name : t("name.guest");
+    meLabel.textContent = shown + "#" + me.uid;
     meGuest.hidden = !!me.named;
     meLabel.classList.toggle("is-guest", !me.named);
+    // Reflect the current chosen name in the editor; leave it empty for guests
+    // so the localized placeholder shows through.
+    if (nameInput && document.activeElement !== nameInput) {
+      nameInput.value = me.named ? me.name : "";
+    }
   }
+
+  // Re-render identity-dependent strings when the language changes.
+  document.addEventListener("nekodrop:langchange", renderMe);
 
   async function loadMe() {
     try {
@@ -114,7 +140,6 @@
     createError.hidden = true;
     const name = document.getElementById("c-name").value.trim();
     if (!name) return;
-    await commitName();
 
     const visibility = createForm.querySelector('input[name="visibility"]:checked').value;
     const payload = {
@@ -227,7 +252,13 @@
     migrateDone.hidden = true;
     const code = migrateInput.value.trim();
     if (!code) return;
-    if (!window.confirm(t("landing.migrate_confirm"))) return;
+    const ok = await NekoUI.confirm({
+      title: t("landing.migrate_use"),
+      body: t("landing.migrate_confirm"),
+      confirmLabel: t("ui.confirm"),
+      cancelLabel: t("msg.cancel"),
+    });
+    if (!ok) return;
     try {
       const res = await fetch("/api/migrate", {
         method: "POST",
@@ -250,7 +281,7 @@
       migrateInput.value = "";
       migration = null; // the adopted account's own status; reload lazily
       if (migrateBox.open) await loadMigration();
-      migrateDone.textContent = t("landing.migrate_done", { name: me.name + "#" + me.uid });
+      migrateDone.textContent = t("landing.migrate_done", { name: (me.named ? me.name : t("name.guest")) + "#" + me.uid });
       migrateDone.hidden = false;
       loadChannels(); // "your/joined channels" now reflect the adopted account
     } catch (err) {

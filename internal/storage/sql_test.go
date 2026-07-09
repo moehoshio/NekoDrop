@@ -200,6 +200,39 @@ func TestSQLiteChannelAndHistoryRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSQLiteAnnouncementUpdateAndDelete verifies that AppendAnnouncement
+// replaces an existing announcement by ID (so it doubles as an edit) and that
+// DeleteAnnouncement removes a single one.
+func TestSQLiteAnnouncementUpdateAndDelete(t *testing.T) {
+	st := newSQLite(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	a := Announcement{ID: "a1", ChannelID: "ch", AuthorUID: "1", AuthorName: "Alice", Text: "first", Time: now}
+	b := Announcement{ID: "a2", ChannelID: "ch", AuthorUID: "1", AuthorName: "Alice", Text: "second", Time: now}
+	for _, x := range []Announcement{a, b} {
+		if err := st.AppendAnnouncement(x); err != nil {
+			t.Fatalf("append %s: %v", x.ID, err)
+		}
+	}
+
+	// Re-appending a1 with new text replaces it rather than duplicating.
+	a.Text = "first (updated)"
+	if err := st.AppendAnnouncement(a); err != nil {
+		t.Fatalf("update a1: %v", err)
+	}
+	anns, err := st.LoadAnnouncements("ch")
+	if err != nil || len(anns) != 2 {
+		t.Fatalf("after update: %+v err=%v", anns, err)
+	}
+
+	if err := st.DeleteAnnouncement("a2"); err != nil {
+		t.Fatalf("delete a2: %v", err)
+	}
+	anns, err = st.LoadAnnouncements("ch")
+	if err != nil || len(anns) != 1 || anns[0].ID != "a1" || anns[0].Text != "first (updated)" {
+		t.Fatalf("after delete: %+v err=%v", anns, err)
+	}
+}
+
 // TestSQLiteMessageDeletion verifies single-message deletion, per-sender
 // purging, and that purging sweeps the file payloads those messages owned.
 func TestSQLiteMessageDeletion(t *testing.T) {

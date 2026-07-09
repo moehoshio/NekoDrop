@@ -44,15 +44,22 @@
         <span id="me-guest" class="me-guest" data-i18n="landing.guest_hint" hidden>(unnamed guest — set a name below)</span>
       </p>
 
-      <form id="join-form" class="join-form" autocomplete="off">
-        <label for="code" data-i18n="landing.code_label">Channel code or path</label>
-        <input id="code" name="code" type="text" data-i18n-placeholder="landing.code_ph" placeholder="e.g. team-cats" required>
-
+      <form id="name-form" class="name-form" autocomplete="off">
         <label for="name">
           <span data-i18n="landing.name_label">Your name</span>
           <span class="optional" data-i18n="landing.optional">(optional)</span>
         </label>
-        <input id="name" name="name" type="text" data-i18n-placeholder="landing.name_ph" placeholder="Guest">
+        <p class="form-note" data-i18n="landing.name_hint">Your name across every channel. Set it once here, then join any channel below.</p>
+        <div class="name-row">
+          <input id="name" name="name" type="text" data-i18n-placeholder="landing.name_ph" placeholder="Guest">
+          <button type="submit" class="ghost-button" data-i18n="landing.save_name">Save name</button>
+        </div>
+        <p id="name-saved" class="form-note ok-note" hidden></p>
+      </form>
+
+      <form id="join-form" class="join-form" autocomplete="off">
+        <label for="code" data-i18n="landing.code_label">Channel code or path</label>
+        <input id="code" name="code" type="text" data-i18n-placeholder="landing.code_ph" placeholder="e.g. team-cats" required>
 
         <button type="submit" data-i18n="landing.join">Join channel</button>
       </form>
@@ -153,6 +160,7 @@
   </main>
 
   <script src="/static/i18n.js"></script>
+  <script src="/static/ui.js"></script>
   <script src="/static/landing.js"></script>
 </body>
 </html>
