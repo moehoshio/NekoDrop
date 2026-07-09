@@ -57,6 +57,70 @@ func TestApplyNickResolvesAndBroadcasts(t *testing.T) {
 	}
 }
 
+// TestAnnouncementLifecycle covers posting, editing and removing announcements:
+// multiple coexist, only owners/admins may mutate them, and each mutation is
+// broadcast to live subscribers.
+func TestAnnouncementLifecycle(t *testing.T) {
+	r := newRoom("test", "id1")
+	r.ownerUID = "100" // the owner may manage announcements
+
+	_, anns, ch, cancel := r.Subscribe("100")
+	defer cancel()
+	if len(anns) != 0 {
+		t.Fatalf("expected no announcements initially, got %d", len(anns))
+	}
+
+	a1 := r.AddAnnouncement("100", "owner", "first")
+	a2 := r.AddAnnouncement("100", "owner", "second")
+	drainEvent(t, ch, EventAnnouncement)
+	drainEvent(t, ch, EventAnnouncement)
+	if got := r.Announcements(); len(got) != 2 {
+		t.Fatalf("expected 2 coexisting announcements, got %d", len(got))
+	}
+
+	// A non-admin cannot edit or delete.
+	if _, err := r.EditAnnouncement("200", a1.ID, "nope"); err == nil {
+		t.Fatal("non-admin edit should be refused")
+	}
+	if err := r.DeleteAnnouncement("200", a1.ID); err == nil {
+		t.Fatal("non-admin delete should be refused")
+	}
+
+	// The owner edits the first announcement.
+	edited, err := r.EditAnnouncement("100", a1.ID, "first (updated)")
+	if err != nil {
+		t.Fatalf("EditAnnouncement: %v", err)
+	}
+	if !edited.Edited || edited.Text != "first (updated)" || edited.ID != a1.ID {
+		t.Fatalf("unexpected edited announcement: %+v", edited)
+	}
+	ev := drainEvent(t, ch, EventAnnouncementEdited)
+	if ev.Announcement == nil || ev.Announcement.Text != "first (updated)" || !ev.Announcement.Edited {
+		t.Fatalf("edited event = %+v", ev.Announcement)
+	}
+
+	// The owner deletes the second announcement.
+	if err := r.DeleteAnnouncement("100", a2.ID); err != nil {
+		t.Fatalf("DeleteAnnouncement: %v", err)
+	}
+	del := drainEvent(t, ch, EventAnnouncementDeleted)
+	if del.AnnouncementID != a2.ID {
+		t.Fatalf("deleted event id = %q, want %q", del.AnnouncementID, a2.ID)
+	}
+	got := r.Announcements()
+	if len(got) != 1 || got[0].ID != a1.ID || !got[0].Edited {
+		t.Fatalf("after delete, announcements = %+v", got)
+	}
+
+	// Editing or deleting a missing announcement reports not-found.
+	if _, err := r.EditAnnouncement("100", "missing", "x"); err != ErrAnnouncementNotFound {
+		t.Fatalf("edit missing err = %v, want ErrAnnouncementNotFound", err)
+	}
+	if err := r.DeleteAnnouncement("100", "missing"); err != ErrAnnouncementNotFound {
+		t.Fatalf("delete missing err = %v, want ErrAnnouncementNotFound", err)
+	}
+}
+
 // drainMessage waits for the next message event on ch, ignoring presence and
 // other non-message events that may be interleaved.
 func drainMessage(t *testing.T, ch <-chan Event) Message {

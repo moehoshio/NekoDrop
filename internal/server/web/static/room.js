@@ -65,7 +65,7 @@
 
   document.title = "NekoDrop · " + roomKey;
 
-  let me = { uid: "", name: "anonymous" };
+  let me = { uid: "", name: "", named: false };
   let channel = null;
   let role = null;
   let historyLoaded = false;
@@ -114,6 +114,18 @@
       encodeURIComponent(fileId) + (inline ? "?inline=1" : "");
   }
 
+  // nameText renders a user's display name: the name they chose, or a localized
+  // "guest" placeholder when they are unnamed (the server sends an empty name
+  // for the auto-assigned default). A name a user actually typed — even the word
+  // "Guest" — is shown verbatim and never translated.
+  function nameText(name) {
+    return name && String(name).trim() ? name : t("name.guest");
+  }
+  // label is the canonical "name#uid" rendering, localizing the guest case.
+  function label(name, uid) {
+    return nameText(name) + (uid ? "#" + uid : "");
+  }
+
   function remember(uid, name) {
     if (uid && name && participants.get(uid) !== name) {
       participants.set(uid, name);
@@ -128,16 +140,16 @@
   function relabel(uid, name) {
     if (!uid || !name) return;
     document.querySelectorAll('.who[data-uid="' + cssEscape(uid) + '"]').forEach((el) => {
-      el.textContent = name + "#" + uid;
+      el.textContent = label(name, uid);
     });
     document.querySelectorAll('.mention[data-uid="' + cssEscape(uid) + '"]').forEach((el) => {
-      el.textContent = "@" + name + "#" + uid;
+      el.textContent = "@" + label(name, uid);
     });
     document.querySelectorAll('.reply-quote[data-uid="' + cssEscape(uid) + '"] .reply-who').forEach((el) => {
-      el.textContent = name + "#" + uid;
+      el.textContent = label(name, uid);
     });
     if (replyTarget && replyTarget.uid === uid && !els.replyBar.hidden) {
-      els.replyWho.textContent = name + "#" + uid;
+      els.replyWho.textContent = label(name, uid);
     }
   }
 
@@ -278,7 +290,7 @@
     who.type = "button";
     who.className = "who";
     if (msg.senderUid) who.dataset.uid = msg.senderUid;
-    who.textContent = (msg.sender || "anonymous") + (msg.senderUid ? "#" + msg.senderUid : "");
+    who.textContent = label(msg.sender, msg.senderUid);
     who.title = "Mention or moderate";
     who.addEventListener("click", () => onAuthorClick(msg.senderUid, msg.sender));
     const when = document.createElement("span");
@@ -384,24 +396,163 @@
     if (atBottom) els.messages.scrollTop = els.messages.scrollHeight;
   }
 
+  // Announcements are special, persistent messages: several coexist, and an
+  // owner/admin can edit or remove each one. They are held in a map keyed by id
+  // so the whole strip can be re-rendered when the language or role changes.
+  const announcements = new Map(); // id -> announcement object, in arrival order
+
   function renderAnnouncement(a) {
     if (!a || !a.id) return;
-    if (els.announcements.querySelector('[data-ann="' + a.id + '"]')) return;
-    els.announcements.hidden = false;
-    const box = document.createElement("div");
-    box.className = "announcement";
-    box.dataset.ann = a.id;
-    const head = document.createElement("div");
-    head.className = "ann-head";
-    head.textContent = "📢 " + (a.authorName || "admin") + (a.authorUid ? "#" + a.authorUid : "");
-    const body = document.createElement("div");
-    body.className = "ann-body";
-    body.textContent = a.text;
-    box.appendChild(head);
-    box.appendChild(body);
-    els.announcements.appendChild(box);
+    const isNew = !announcements.has(a.id);
+    announcements.set(a.id, a);
+    renderAnnouncementList();
     // New announcements (after the initial replay) always notify.
-    if (historyLoaded) maybeNotify("announcement", a.authorName, a.text);
+    if (isNew && historyLoaded) maybeNotify("announcement", a.authorName, a.text);
+  }
+
+  function applyAnnouncementEdit(a) {
+    if (!a || !a.id || !announcements.has(a.id)) return;
+    announcements.set(a.id, a);
+    renderAnnouncementList();
+  }
+
+  function applyAnnouncementDelete(id) {
+    if (!announcements.delete(id)) return;
+    renderAnnouncementList();
+  }
+
+  // Rebuild the announcement strip from the map. Cheap (announcements are few)
+  // and keeps guest labels / management controls in sync with language + role.
+  function renderAnnouncementList() {
+    if (!els.announcements) return;
+    const canManage = !!(role && role.admin);
+    els.announcements.classList.toggle("can-manage", canManage);
+    els.announcements.hidden = announcements.size === 0;
+    els.announcements.innerHTML = "";
+    announcements.forEach((a) => {
+      const box = document.createElement("div");
+      box.className = "announcement";
+      box.dataset.ann = a.id;
+
+      const head = document.createElement("div");
+      head.className = "ann-head";
+      const who = document.createElement("span");
+      who.className = "ann-who";
+      who.textContent = "📢 " + label(a.authorName, a.authorUid);
+      head.appendChild(who);
+      if (a.edited) {
+        const mark = document.createElement("span");
+        mark.className = "edited-mark";
+        mark.textContent = t("msg.edited");
+        head.appendChild(mark);
+      }
+      if (canManage) {
+        const actions = document.createElement("span");
+        actions.className = "ann-actions";
+        const edit = document.createElement("button");
+        edit.type = "button";
+        edit.className = "ann-action";
+        edit.textContent = "✎";
+        edit.title = t("msg.edit");
+        edit.addEventListener("click", () => startAnnouncementEdit(a.id));
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "ann-action ann-delete";
+        del.textContent = "🗑";
+        del.title = t("ann.remove");
+        del.addEventListener("click", () => deleteAnnouncement(a.id));
+        actions.appendChild(edit);
+        actions.appendChild(del);
+        head.appendChild(actions);
+      }
+
+      const body = document.createElement("div");
+      body.className = "ann-body";
+      body.textContent = a.text;
+      box.appendChild(head);
+      box.appendChild(body);
+      els.announcements.appendChild(box);
+    });
+  }
+
+  // Swap an announcement body into an inline editor (mirrors message editing).
+  function startAnnouncementEdit(id) {
+    const a = announcements.get(id);
+    const box = els.announcements.querySelector('[data-ann="' + cssEscape(id) + '"]');
+    if (!a || !box || box.querySelector(".edit-box")) return;
+    const body = box.querySelector(".ann-body");
+    if (body) body.hidden = true;
+
+    const form = document.createElement("form");
+    form.className = "edit-box";
+    const input = document.createElement("textarea");
+    input.className = "edit-input";
+    input.rows = 2;
+    input.value = a.text;
+    const save = document.createElement("button");
+    save.type = "submit";
+    save.className = "mod-button ok";
+    save.textContent = t("msg.save");
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "mod-button";
+    cancel.textContent = t("msg.cancel");
+
+    function close() {
+      form.remove();
+      if (body) body.hidden = false;
+    }
+    cancel.addEventListener("click", close);
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") { close(); return; }
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
+    });
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      try {
+        const res = await api("/api/channels/" + encodeURIComponent(roomKey) + "/announcements/" + encodeURIComponent(id), {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: text }),
+        });
+        if (!res.ok) throw new Error((await res.text()).trim());
+        // The broadcast edit event re-renders the strip; nothing else to do.
+      } catch (err) {
+        showNotice(err.message);
+        setTimeout(() => { els.notice.hidden = true; }, 4000);
+      }
+    });
+    const actions = document.createElement("div");
+    actions.className = "edit-actions";
+    actions.appendChild(save);
+    actions.appendChild(cancel);
+    form.appendChild(input);
+    form.appendChild(actions);
+    box.appendChild(form);
+    input.focus();
+  }
+
+  async function deleteAnnouncement(id) {
+    const ok = await NekoUI.confirm({
+      title: t("ann.remove"),
+      body: t("ann.remove_confirm"),
+      confirmLabel: t("ann.remove"),
+      cancelLabel: t("msg.cancel"),
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const res = await api("/api/channels/" + encodeURIComponent(roomKey) + "/announcements/" + encodeURIComponent(id), {
+        method: "DELETE",
+      });
+      if (!res.ok && res.status !== 204) throw new Error((await res.text()).trim());
+      applyAnnouncementDelete(id);
+    } catch (err) {
+      showNotice(err.message);
+      setTimeout(() => { els.notice.hidden = true; }, 4000);
+    }
   }
 
   // ---------- mentions / notifications ----------
@@ -501,10 +652,10 @@
     let title = channel && channel.name ? channel.name : roomKey;
     let body;
     if (kind === "announcement") {
-      body = "📢 " + (who || "") + ": " + (text || "");
+      body = "📢 " + nameText(who) + ": " + (text || "");
     } else {
       const prefix = kind === "mention" ? "@ " : "";
-      body = prefix + (who || "anonymous") + ": " + (text || "");
+      body = prefix + nameText(who) + ": " + (text || "");
     }
     showBrowserNotification(title, body);
   }
@@ -574,7 +725,7 @@
     els.mentionPop.innerHTML = "";
     matches.slice(0, 6).forEach((p) => {
       const li = document.createElement("li");
-      li.textContent = p.name + "#" + p.uid;
+      li.textContent = label(p.name, p.uid);
       li.addEventListener("mousedown", function (e) {
         e.preventDefault();
         insertMention(p);
@@ -588,7 +739,7 @@
     const pos = els.textInput.selectionStart;
     const before = val.slice(0, mentionAnchor);
     const after = val.slice(pos);
-    const token = "@" + p.name + "#" + p.uid + " ";
+    const token = "@" + nameText(p.name) + "#" + p.uid + " ";
     els.textInput.value = before + token + after;
     const caret = (before + token).length;
     els.textInput.setSelectionRange(caret, caret);
@@ -609,7 +760,7 @@
     if (!uid || uid === me.uid) return;
     const display = participants.get(uid) || name;
     remember(uid, display);
-    const token = "@" + display + "#" + uid + " ";
+    const token = "@" + nameText(display) + "#" + uid + " ";
     els.textInput.value += (els.textInput.value && !/\s$/.test(els.textInput.value) ? " " : "") + token;
     els.textInput.focus();
   }
@@ -628,7 +779,7 @@
     snippet.className = "reply-snippet";
     if (ref) {
       if (ref.uid) quote.dataset.uid = ref.uid;
-      who.textContent = (participants.get(ref.uid) || "anonymous") + (ref.uid ? "#" + ref.uid : "");
+      who.textContent = label(participants.get(ref.uid), ref.uid);
       snippet.textContent = replySnippetText(ref);
     } else {
       who.textContent = "";
@@ -801,7 +952,14 @@
   }
 
   async function deleteMessage(id) {
-    if (!window.confirm(t("msg.delete_confirm"))) return;
+    const ok = await NekoUI.confirm({
+      title: t("msg.delete"),
+      body: t("msg.delete_confirm"),
+      confirmLabel: t("msg.delete"),
+      cancelLabel: t("msg.cancel"),
+      danger: true,
+    });
+    if (!ok) return;
     try {
       const res = await api("/api/messages/" + encodeURIComponent(roomKey) + "/" + encodeURIComponent(id), {
         method: "DELETE",
@@ -833,6 +991,8 @@
     els.joinBtn.disabled = r.pending;
     els.settingsBtn.hidden = !r.admin;
     els.dangerSection.hidden = !r.owner;
+    // Announcement edit/remove controls follow admin standing.
+    renderAnnouncementList();
 
     if (r.canSpeak) {
       els.textInput.disabled = false;
@@ -880,6 +1040,8 @@
         case "message_deleted": if (ev.messageId) applyDelete(ev.messageId); break;
         case "messages_purged": if (ev.purgedUid) applyPurge(ev.purgedUid); break;
         case "announcement": renderAnnouncement(ev.announcement); break;
+        case "announcement_edited": if (ev.announcement) applyAnnouncementEdit(ev.announcement); break;
+        case "announcement_deleted": if (ev.announcementId) applyAnnouncementDelete(ev.announcementId); break;
         case "identity":
           if (ev.identity) remember(ev.identity.uid, ev.identity.name);
           break;
@@ -1300,10 +1462,17 @@
     b.type = "button";
     b.className = "mod-button danger";
     b.textContent = t("mod.ban");
-    b.addEventListener("click", function () {
-      if (!window.confirm(t("mod.ban_confirm"))) return;
-      const purge = window.confirm(t("mod.ban_purge_confirm"));
-      moderate("ban", uid, { purgeMessages: purge });
+    b.addEventListener("click", async function () {
+      const res = await NekoUI.confirm({
+        title: t("mod.ban"),
+        body: t("mod.ban_confirm"),
+        confirmLabel: t("mod.ban"),
+        cancelLabel: t("msg.cancel"),
+        danger: true,
+        checkbox: { label: t("mod.ban_purge_label"), checked: false },
+      });
+      if (!res.ok) return;
+      moderate("ban", uid, { purgeMessages: res.checked });
     });
     return b;
   }
@@ -1324,7 +1493,7 @@
       const li = document.createElement("li");
       const name = document.createElement("span");
       name.className = "member-name";
-      name.textContent = p.name + "#" + p.uid;
+      name.textContent = label(p.name, p.uid);
       li.appendChild(name);
       const actions = document.createElement("span");
       actions.className = "member-actions";
@@ -1355,7 +1524,7 @@
       head.className = "member-head";
       const name = document.createElement("span");
       name.className = "member-name";
-      name.textContent = m.name + "#" + m.uid;
+      name.textContent = label(m.name, m.uid);
       head.appendChild(name);
       if (m.owner) head.appendChild(badge("mod.owner", "owner"));
       else if (m.admin) head.appendChild(badge("mod.admin_badge", "admin"));
@@ -1395,7 +1564,14 @@
   }
 
   els.dissolveBtn.addEventListener("click", async function () {
-    if (!window.confirm(t("settings.dissolve_confirm"))) return;
+    const ok = await NekoUI.confirm({
+      title: t("settings.dissolve"),
+      body: t("settings.dissolve_confirm"),
+      confirmLabel: t("settings.dissolve"),
+      cancelLabel: t("msg.cancel"),
+      danger: true,
+    });
+    if (!ok) return;
     const res = await api("/api/channels/" + encodeURIComponent(roomKey), { method: "DELETE" });
     if (res.ok || res.status === 204) {
       window.location.href = "/";
@@ -1404,12 +1580,32 @@
     }
   });
 
+  // Re-apply every rendered name so switching language updates unnamed "guest"
+  // labels too (named users are already handled by relabel()/identity events).
+  function relocalizeNames() {
+    document.querySelectorAll('.who[data-uid]').forEach((el) => {
+      el.textContent = label(participants.get(el.dataset.uid), el.dataset.uid);
+    });
+    document.querySelectorAll('.reply-quote[data-uid]').forEach((q) => {
+      const w = q.querySelector('.reply-who');
+      if (w) w.textContent = label(participants.get(q.dataset.uid), q.dataset.uid);
+    });
+    document.querySelectorAll('.mention[data-uid]').forEach((el) => {
+      if (!participants.get(el.dataset.uid)) return; // keep literal typed mention
+    });
+    if (replyTarget && replyTarget.uid && !els.replyBar.hidden) {
+      els.replyWho.textContent = label(participants.get(replyTarget.uid), replyTarget.uid);
+    }
+    renderAnnouncementList();
+  }
+
   // Re-render dynamic, script-generated text when the language changes.
   document.addEventListener("nekodrop:langchange", function () {
     if (channel) applyChannel(channel);
     if (role) applyRole(role);
     renderPending(lastPending);
     renderMembers();
+    relocalizeNames();
   });
 
   // ---------- bootstrap ----------
@@ -1418,7 +1614,9 @@
       const res = await api("/api/me");
       if (res.ok) {
         me = await res.json();
-        remember(me.uid, me.name);
+        // Only remember a deliberately chosen name; an unnamed visitor keeps the
+        // localized guest placeholder rather than a baked-in default word.
+        if (me.named) remember(me.uid, me.name);
       }
     } catch (e) { /* ignore */ }
   }

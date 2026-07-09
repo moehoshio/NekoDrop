@@ -20,7 +20,7 @@ import (
 
 func main() {
 	// Resolve configuration: file < environment < flags.
-	configPath := flag.String("config", defaultEnv("NEKODROP_CONFIG", "config.json"), "path to JSON config file (optional)")
+	configPath := flag.String("config", defaultEnv("NEKODROP_CONFIG", ""), "path to a JSON or YAML config file (optional; a commented config.yaml is created on first run when none is found)")
 
 	// Flags default to the empty/zero sentinel so we can tell whether the user
 	// set them explicitly and only then override the file/env values.
@@ -33,11 +33,17 @@ func main() {
 	storageDSN := flag.String("storage-dsn", "", "storage DSN: sqlite file path or mysql DSN (overrides config)")
 	flag.Parse()
 
-	// The config file is optional unless the user explicitly named one.
-	explicitConfig := *configPath != "config.json" || os.Getenv("NEKODROP_CONFIG") != ""
-	cfg, err := config.LoadFile(*configPath, !explicitConfig)
+	// Load the config file the operator named, or search the default filenames
+	// and, on a first run with none present, write a commented config.yaml.
+	cfg, usedPath, generated, err := config.Resolve(*configPath)
 	if err != nil {
 		log.Fatalf("nekodrop: %v", err)
+	}
+	switch {
+	case generated:
+		log.Printf("nekodrop: no config file found; wrote defaults to %s", usedPath)
+	case usedPath != "":
+		log.Printf("nekodrop: loaded configuration from %s", usedPath)
 	}
 	cfg.ApplyEnv()
 

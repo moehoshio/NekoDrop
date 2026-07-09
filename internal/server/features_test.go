@@ -10,9 +10,10 @@ import (
 	"github.com/moehoshio/NekoDrop/internal/storage"
 )
 
-// TestDefaultNameIsGuestAndDistinct verifies that a never-named visitor keeps
-// the distinct default name (so the unnamed state is never confused with a
-// deliberately chosen "anonymous"), and that naming flips the Named flag.
+// TestDefaultNameIsGuestAndDistinct verifies that a never-named visitor is
+// reported as unnamed with an empty wire name (so the client can render a
+// localized "guest" placeholder), and that naming flips the Named flag and
+// sends the chosen name verbatim.
 func TestDefaultNameIsGuestAndDistinct(t *testing.T) {
 	s := newTestServer(t)
 	c := newClient(t, s)
@@ -23,8 +24,8 @@ func TestDefaultNameIsGuestAndDistinct(t *testing.T) {
 		Named bool   `json:"named"`
 	}
 	json.Unmarshal(rec.Body.Bytes(), &me)
-	if me.Name != "Guest" || me.Named {
-		t.Fatalf("unnamed visitor = %+v, want {Guest false}", me)
+	if me.Name != "" || me.Named {
+		t.Fatalf("unnamed visitor = %+v, want {\"\" false}", me)
 	}
 
 	// Deliberately choosing "anonymous" is a named state, distinct from default.
@@ -64,6 +65,95 @@ func TestOwnedChannelsListed(t *testing.T) {
 	json.Unmarshal(rec.Body.Bytes(), &resp)
 	if len(resp.Mine) != 0 {
 		t.Fatalf("other visitor mine = %+v, want empty", resp.Mine)
+	}
+}
+
+// TestGuestMessageSenderIsEmpty verifies that an unnamed visitor's messages
+// carry an empty sender (the client renders a localized "guest" placeholder),
+// while a chosen name travels with the message verbatim.
+func TestGuestMessageSenderIsEmpty(t *testing.T) {
+	s := newTestServer(t)
+
+	guest := newClient(t, s)
+	rec := guest.do("POST", "/api/messages/room-x", "application/json", `{"text":"hi"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("guest post = %d: %s", rec.Code, rec.Body.String())
+	}
+	var m room.Message
+	json.Unmarshal(rec.Body.Bytes(), &m)
+	if m.Sender != "" {
+		t.Fatalf("guest sender = %q, want empty", m.Sender)
+	}
+
+	named := newClient(t, s)
+	named.do("POST", "/api/me", "application/json", `{"name":"Rin"}`)
+	rec = named.do("POST", "/api/messages/room-x", "application/json", `{"text":"yo"}`)
+	json.Unmarshal(rec.Body.Bytes(), &m)
+	if m.Sender != "Rin" {
+		t.Fatalf("named sender = %q, want Rin", m.Sender)
+	}
+}
+
+// TestAnnouncementEndpoints exercises posting, editing and removing
+// announcements over HTTP, and that only an owner/admin may mutate them.
+func TestAnnouncementEndpoints(t *testing.T) {
+	s := newTestServer(t)
+	owner := newClient(t, s)
+
+	rec := owner.do("POST", "/api/channels", "application/json", `{"name":"Notices","visibility":"public"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d: %s", rec.Code, rec.Body.String())
+	}
+	var ch struct {
+		Key string `json:"key"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &ch)
+	if ch.Key == "" {
+		t.Fatal("channel create returned no key")
+	}
+	base := "/api/channels/" + ch.Key + "/announcements"
+
+	rec = owner.do("POST", base, "application/json", `{"text":"hello"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("post announcement = %d: %s", rec.Code, rec.Body.String())
+	}
+	var a struct {
+		ID     string `json:"id"`
+		Text   string `json:"text"`
+		Edited bool   `json:"edited"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &a)
+	if a.ID == "" || a.Text != "hello" {
+		t.Fatalf("announcement = %+v", a)
+	}
+
+	// A stranger may neither edit nor remove announcements.
+	stranger := newClient(t, s)
+	if rec := stranger.do("PATCH", base+"/"+a.ID, "application/json", `{"text":"x"}`); rec.Code != http.StatusForbidden {
+		t.Fatalf("stranger edit = %d, want 403", rec.Code)
+	}
+	if rec := stranger.do("DELETE", base+"/"+a.ID, "", ""); rec.Code != http.StatusForbidden {
+		t.Fatalf("stranger delete = %d, want 403", rec.Code)
+	}
+
+	// The owner edits it; the Edited flag flips.
+	rec = owner.do("PATCH", base+"/"+a.ID, "application/json", `{"text":"updated"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("owner edit = %d: %s", rec.Code, rec.Body.String())
+	}
+	json.Unmarshal(rec.Body.Bytes(), &a)
+	if a.Text != "updated" || !a.Edited {
+		t.Fatalf("edited announcement = %+v", a)
+	}
+
+	// Editing a missing announcement is a 404.
+	if rec := owner.do("PATCH", base+"/missing", "application/json", `{"text":"z"}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("edit missing = %d, want 404", rec.Code)
+	}
+
+	// The owner removes it.
+	if rec := owner.do("DELETE", base+"/"+a.ID, "", ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("owner delete = %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

@@ -52,15 +52,17 @@ Then open <http://localhost:8080> in your browser, enter a room code (or generat
 - **Account migration** — off by default, per user: opt in to get a persistent migration code, then enter it in another browser to inherit the same account there (see [Account migration](#account-migration)).
 - **Admin panel** — an operator backend at `/admin`, disabled by default: disable channels, ban users site-wide, grant per-channel/per-user upload-size exemptions, and edit the runtime configuration online (see [Admin panel](#admin-panel)).
 - **Pluggable storage** — keep everything in memory (default) or persist to SQLite or MySQL so channels and history survive restarts.
-- **Configurable** — a JSON config file plus environment variables and flags control the listen address, limits and storage.
+- **Configurable** — a YAML or JSON config file plus environment variables and flags control the listen address, limits and storage. On first run a commented `config.yaml` is generated for you.
 
 ## Configuration
 
-Settings are resolved from a **JSON config file**, then **environment variables**, then **command-line flags** (each layer overrides the previous). Every setting has a default, so NekoDrop runs with no configuration at all.
+Settings are resolved from a **config file** (YAML or JSON), then **environment variables**, then **command-line flags** (each layer overrides the previous). Every setting has a default, so NekoDrop runs with no configuration at all.
+
+The config file may be **YAML** (`.yaml`/`.yml`) or **JSON** (`.json`) — the format is chosen by the file extension, and the keys are identical either way. When you do not name a file, NekoDrop looks for `config.yaml`, `config.yml`, then `config.json`; if none exists it writes a commented [`config.yaml`](config.example.yaml) filled with the defaults so you have something to edit.
 
 | Flag | Env var | Config key | Default | Description |
 | ---- | ------- | ---------- | ------- | ----------- |
-| `-config` | `NEKODROP_CONFIG` | — | `config.json` | Path to a JSON config file (optional) |
+| `-config` | `NEKODROP_CONFIG` | — | auto (`config.yaml`) | Path to a YAML or JSON config file (optional) |
 | `-host` | `NEKODROP_HOST` | `host` | `` (all) | IP address to listen on |
 | `-port` | `NEKODROP_PORT` | `port` | `8080` | TCP port to listen on |
 | `-addr` | `NEKODROP_ADDR` | — | `:8080` | `host:port` shorthand |
@@ -71,21 +73,34 @@ Settings are resolved from a **JSON config file**, then **environment variables*
 | — | `NEKODROP_ADMIN_ENABLED` | `admin.enabled` | `false` | Turn on the admin panel at `/admin` |
 | — | `NEKODROP_ADMIN_TOKEN` | `admin.token` | — | Admin access token (required for the panel to activate) |
 
-Example config file ([`config.example.json`](config.example.json)):
+Example config file ([`config.example.yaml`](config.example.yaml) — see the file for a fully commented version):
+
+```yaml
+host: "0.0.0.0"
+port: 8080
+maxUploadBytes: 33554432
+maxChannelsPerUser: 5
+storage:
+  backend: sqlite
+  dsn: nekodrop.db
+admin:
+  enabled: false
+  token: ""
+```
+
+The same settings in JSON ([`config.example.json`](config.example.json)):
 
 ```json
 {
   "host": "0.0.0.0",
   "port": 8080,
-  "maxUploadBytes": 33554432,
-  "maxChannelsPerUser": 5,
-  "storage": { "backend": "sqlite", "dsn": "nekodrop.db" },
-  "admin": { "enabled": false, "token": "" }
+  "storage": { "backend": "sqlite", "dsn": "nekodrop.db" }
 }
 ```
 
 ```bash
-./nekodrop -config config.json
+./nekodrop                 # first run writes a commented config.yaml, then edit it
+./nekodrop -config config.yaml
 # or purely from flags:
 ./nekodrop -host 0.0.0.0 -port 9000 -storage sqlite -storage-dsn nekodrop.db
 ```
@@ -117,10 +132,12 @@ With a persistent backend the full history still lives in the database; these li
 
 ### Admin panel
 
-A server-operator backend, **disabled by default**. Enable it in the config file (both keys are required — a bare `"enabled": true` without a token never exposes the panel):
+A server-operator backend, **disabled by default**. Enable it in the config file (both keys are required — a bare `enabled: true` without a token never exposes the panel):
 
-```json
-{ "admin": { "enabled": true, "token": "choose-a-long-random-secret" } }
+```yaml
+admin:
+  enabled: true
+  token: "choose-a-long-random-secret"
 ```
 
 Then open `/admin` and unlock it with the token (sent as an `X-Admin-Token` header on every request). While disabled, `/admin` and the whole admin API answer 404. The panel manages site-wide state layered on top of the per-channel owner/admin moderation model:
@@ -170,7 +187,7 @@ go test ./...
 .
 ├── main.go                  # Server entry point, flags, graceful shutdown
 └── internal/
-    ├── config/              # JSON file + env + flag configuration
+    ├── config/              # YAML/JSON file + env + flag configuration
     ├── storage/             # Persistence: memory / sqlite / mysql backends
     ├── user/                # Identities and UID assignment
     ├── room/                # Channels, membership, messages, files, events

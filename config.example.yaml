@@ -1,0 +1,57 @@
+# NekoDrop configuration.
+#
+# Every setting is optional: the values below are the built-in defaults, so an
+# empty file — or no file at all — runs a working server. Settings are resolved
+# in increasing order of precedence: this file < environment variables <
+# command-line flags.
+#
+# Both YAML (this file) and JSON are accepted; the format is chosen by the file
+# extension (.yaml/.yml vs .json). The keys are identical in either format.
+
+# IP address to listen on. Empty ("") means all interfaces.
+host: ""
+
+# TCP port to listen on.
+port: 8080
+
+# Maximum size of a single uploaded file, in bytes. Default: 32 MiB.
+maxUploadBytes: 33554432
+
+# How many channels one user may own at the same time. 0 means unlimited.
+maxChannelsPerUser: 5
+
+# Durable persistence backend.
+storage:
+  # backend: one of "memory", "sqlite" or "mysql".
+  #   memory — nothing is persisted; fastest and simplest (default).
+  #   sqlite — embedded single-file database; set dsn to a file path.
+  #   mysql  — external MySQL/MariaDB; set dsn to a Go MySQL DSN.
+  backend: memory
+  # dsn: data source name for the backend (ignored for "memory").
+  #   sqlite: a file path, e.g. "nekodrop.db"
+  #   mysql:  "user:pass@tcp(127.0.0.1:3306)/nekodrop"
+  dsn: ""
+
+# In-memory resource limits. Each caps what is held resident in memory so that
+# untrusted traffic cannot exhaust it; a non-positive value falls back to the
+# safe default shown (a non-positive value never means "unlimited").
+limits:
+  # Recent messages kept per channel; older ones are evicted with their files.
+  maxMessagesPerChannel: 1000
+  # In-memory uploaded-file bytes per channel. Default: 128 MiB.
+  maxFileBytesPerChannel: 134217728
+  # Total resident memory per channel (message text + file payloads). 160 MiB.
+  maxBytesPerChannel: 167772160
+  # Concurrent live connections per channel.
+  maxSubscribersPerChannel: 512
+  # Simultaneously live channels; idle ownerless ones are reclaimed for room.
+  maxChannels: 10000
+  # Identities retained in memory; the oldest unnamed ones are evicted.
+  maxUsers: 100000
+
+# Operator admin panel at /admin. Disabled by default. BOTH keys are required:
+# a bare "enabled: true" with an empty token never exposes the panel.
+admin:
+  enabled: false
+  # Secret an administrator presents to unlock the panel. Keep it long/random.
+  token: ""
